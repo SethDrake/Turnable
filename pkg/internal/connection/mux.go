@@ -490,6 +490,7 @@ type VPNMuxServer struct {
 	lastPing      atomic.Int64 // last PING received from client
 	activeStreams sync.Map     // uint32 → *vpnMuxServerStream
 	sessionUUID   string
+	done          chan struct{} // closed on clean client disconnect
 }
 
 // SetSessionUUID sets the session UUID used in log messages.
@@ -526,6 +527,7 @@ func NewVPNMuxServer(transport io.ReadWriteCloser) (*VPNMuxServer, error) {
 	return &VPNMuxServer{
 		session: session,
 		control: controlStream,
+		done:    make(chan struct{}),
 	}, nil
 }
 
@@ -552,6 +554,8 @@ func (s *VPNMuxServer) AcceptChannels(ctx context.Context) <-chan VPNMuxChannel 
 			select {
 			case <-ctx.Done():
 				return
+			case <-s.done:
+				return
 			case <-ticker.C:
 				if time.Since(time.Unix(0, s.lastPing.Load())) > vpnMuxPingTimeout {
 					slog.Warn("vpnmux server client ping timeout, closing session", "session_uuid", s.sessionUUID)
@@ -573,7 +577,7 @@ func (s *VPNMuxServer) AcceptChannels(ctx context.Context) <-chan VPNMuxChannel 
 				s.activeStreams.Delete(id)
 			})
 			s.activeStreams.Store(id, ss)
-			slog.Debug("vpnmux channel opened", "side", "server", "stream_id", id)
+			slog.Debug("vpnmux channel opened", "side", "server", "stream_id", id, "session_uuid", s.sessionUUID)
 			select {
 			case out <- VPNMuxChannel{ID: id, Stream: ss, CloseRequested: ss.closeReqCh}:
 				return true
@@ -664,11 +668,11 @@ func (s *VPNMuxServer) controlLoop(out chan<- VPNMuxControlMessage, errCh chan<-
 	for {
 		msg, err := VPNMuxReadControlMessage(s.control)
 		if err != nil {
-			slog.Debug("vpnmux control loop stopped", "side", "server", "error", err)
+			slog.Debug("vpnmux control loop stopped", "side", "server", "error", err, "session_uuid", s.sessionUUID)
 			errCh <- err
 			return
 		}
-		slog.Debug("vpnmux control read", "side", "server", "type", msg.Type, "stream_id", msg.StreamID)
+		slog.Debug("vpnmux control read", "side", "server", "type", msg.Type, "stream_id", msg.StreamID, "session_uuid", s.sessionUUID)
 		switch msg.Type {
 		case vpnMuxControlTypePing:
 			s.lastPing.Store(time.Now().UnixNano())
@@ -677,7 +681,8 @@ func (s *VPNMuxServer) controlLoop(out chan<- VPNMuxControlMessage, errCh chan<-
 			s.controlMu.Unlock()
 			continue
 		case vpnMuxControlTypeDisconnect:
-			slog.Info("vpnmux server received disconnect from client, closing session")
+			slog.Info("vpnmux server received disconnect from client, closing session", "session_uuid", s.sessionUUID)
+			close(s.done)
 			_ = s.Close()
 			errCh <- io.EOF
 			return
@@ -691,11 +696,11 @@ func (s *VPNMuxServer) dataLoop(out chan<- vpnMuxDataStream, errCh chan<- error)
 	for {
 		stream, err := s.session.AcceptStream()
 		if err != nil {
-			slog.Debug("vpnmux data loop stopped", "side", "server", "error", err)
+			slog.Debug("vpnmux data loop stopped", "side", "server", "error", err, "session_uuid", s.sessionUUID)
 			errCh <- err
 			return
 		}
-		slog.Debug("vpnmux data stream accepted", "side", "server", "stream_id", stream.ID())
+		slog.Debug("vpnmux data stream accepted", "side", "server", "stream_id", stream.ID(), "session_uuid", s.sessionUUID)
 		out <- vpnMuxDataStream{id: stream.ID(), stream: stream}
 	}
 }

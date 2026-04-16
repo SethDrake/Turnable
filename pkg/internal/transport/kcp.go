@@ -34,8 +34,11 @@ func (D *KCPHandler) ID() string {
 }
 
 // WrapPacketConn initializes one KCP session directly over a net.PacketConn (e.g. MultiPeerConn).
+// pc.LocalAddr() is passed as the remote address so that the kcp readLoop's source filter matches
+// the address returned by pc.ReadFrom. Using kcpDummyAddr{} would cause every inbound packet to be
+// silently dropped, because "kcp-transport" != the address string returned by PeerConn.ReadFrom.
 func (D *KCPHandler) WrapPacketConn(pc net.PacketConn) (io.ReadWriteCloser, error) {
-	session, err := kcp.NewConn3(kcpConversation, kcpDummyAddr{}, nil, 0, 0, pc)
+	session, err := kcp.NewConn3(kcpConversation, pc.LocalAddr(), nil, 0, 0, pc)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize kcp session over packetconn: %w", err)
 	}

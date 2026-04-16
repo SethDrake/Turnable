@@ -315,11 +315,11 @@ func (V *VKHandler) fetchCallAnonymousToken(ctx context.Context, messagesAccessT
 					form.Del("success_token")
 					form.Del("captcha_ts")
 					form.Del("captcha_attempt")
-					slog.Info("vk captcha rate limited, retrying", "delay", 5*time.Second)
+					slog.Info("vk captcha rate limited, retrying", "delay", 1*time.Second)
 					select {
 					case <-ctx.Done():
 						return "", ctx.Err()
-					case <-time.After(5 * time.Second):
+					case <-time.After(1 * time.Second):
 					}
 					continue
 				}

@@ -1,0 +1,186 @@
+name: CI
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  lint:
+    name: Lint & fmt-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+
+      - name: Run gofmt (check)
+        run: |
+          fmt_output=$(gofmt -l . || true)
+          if [ -n "$fmt_output" ]; then
+            echo "The following files need formatting:"
+            echo "$fmt_output"
+            echo "Run 'gofmt -w .' to fix."
+            exit 1
+          fi
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m ./...
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64   }
+          - { goos: linux,   goarch: arm64   }
+          - { goos: linux,   goarch: 386     }
+          - { goos: linux,   goarch: arm,    goarm: "7" }
+          - { goos: linux,   goarch: mipsle, gomips: softfloat }
+          - { goos: linux,   goarch: mips,   gomips: softfloat }
+          - { goos: linux,   goarch: riscv64 }
+          - { goos: darwin,  goarch: amd64   }
+          - { goos: darwin,  goarch: arm64   }
+          - { goos: windows, goarch: amd64   }
+          - { goos: windows, goarch: arm64   }
+          - { goos: windows, goarch: 386     }
+          - { goos: freebsd, goarch: amd64   }
+          - { goos: freebsd, goarch: arm64   }
+          - { goos: android, goarch: arm64,  cgo: "1", api: "21" }
+          - { goos: android, goarch: arm,    cgo: "1", api: "21" }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+
+      - name: Setup Android NDK
+        if: matrix.goos == 'android'
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+          add-to-path: false
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          GOMIPS: ${{ matrix.gomips }}
+          CGO_ENABLED: ${{ matrix.cgo || '0' }}
+          ANDROID_API: ${{ matrix.api }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          if [ "$GOOS" = "android" ]; then
+            if [ -z "$ANDROID_NDK_HOME" ]; then
+              echo "ANDROID_NDK_HOME is not set"
+              exit 1
+            fi
+            TOOLCHAIN_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+            if [ "$GOARCH" = "arm64" ]; then
+              export CC="$TOOLCHAIN_BIN/aarch64-linux-android${ANDROID_API}-clang"
+            elif [ "$GOARCH" = "arm" ]; then
+              export CC="$TOOLCHAIN_BIN/armv7a-linux-androideabi${ANDROID_API}-clang"
+            fi
+          fi
+
+          mkdir -p dist
+          EXT=""
+          [ "$GOOS" = "windows" ] && EXT=".exe"
+
+          go build -ldflags "-s -w" -trimpath \
+            -o "dist/turnable-${GOOS}-${GOARCH}${EXT}" \
+            ./cmd
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: turnable-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/
+
+  release:
+    name: Release
+    needs: [lint, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Determine bump type
+        id: bump
+        run: |
+          COMMIT_MSG="$(git log -1 --format='%s')"
+          echo "Commit: $COMMIT_MSG"
+
+          if echo "$COMMIT_MSG" | grep -qiF "(major)"; then
+            echo "type=major" >> "$GITHUB_OUTPUT"
+          elif echo "$COMMIT_MSG" | grep -qiF "(minor)"; then
+            echo "type=minor" >> "$GITHUB_OUTPUT"
+          elif echo "$COMMIT_MSG" | grep -qiF "(patch)"; then
+            echo "type=patch" >> "$GITHUB_OUTPUT"
+          else
+            echo "type=none" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute next version
+        if: steps.bump.outputs.type != 'none'
+        id: version
+        run: |
+          LATEST="$(git tag -l | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)"
+          if [ -z "$LATEST" ]; then
+            MAJOR=0; MINOR=0; PATCH=0
+          else
+            IFS=. read -r MAJOR MINOR PATCH <<< "$LATEST"
+          fi
+
+          case "${{ steps.bump.outputs.type }}" in
+            major) MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR+1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH+1)) ;;
+          esac
+
+          NEXT="${MAJOR}.${MINOR}.${PATCH}"
+          echo "tag=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "Next version: $NEXT"
+
+      - name: Download all artifacts
+        if: steps.bump.outputs.type != 'none'
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        if: steps.bump.outputs.type != 'none'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Turnable ${{ steps.version.outputs.tag }}"
+          target_commitish: ${{ github.sha }}
+          files: dist/**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: No release
+        if: steps.bump.outputs.type == 'none'
+        run: echo "No (major)/(minor)/(patch) keyword in commit message — skipping release."

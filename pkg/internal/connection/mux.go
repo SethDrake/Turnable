@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	vpnMuxControlVersion          byte = 3 // protoc
+	vpnMuxControlVersion          byte = 3
 	vpnMuxControlTypeOpen         byte = 1
 	vpnMuxControlTypePing         byte = 2
 	vpnMuxControlTypePong         byte = 3
@@ -444,6 +444,13 @@ func (c *VPNMuxClient) OpenChannel() (io.ReadWriteCloser, error) {
 	return ms, nil
 }
 
+// SendDisconnect sends a Disconnect control message to the server, notifying it that the
+// client is disconnecting and the server should tear down the session immediately.
+// Best-effort: errors are ignored by the caller.
+func (c *VPNMuxClient) SendDisconnect() error {
+	return c.writeControl(VPNMuxControlMessage{Type: vpnMuxControlTypeDisconnect})
+}
+
 // Close tears down the client mux session.
 func (c *VPNMuxClient) Close() error {
 	if c.pingCancel != nil {
@@ -669,6 +676,11 @@ func (s *VPNMuxServer) controlLoop(out chan<- VPNMuxControlMessage, errCh chan<-
 			_ = VPNMuxWriteControlMessage(s.control, VPNMuxControlMessage{Type: vpnMuxControlTypePong})
 			s.controlMu.Unlock()
 			continue
+		case vpnMuxControlTypeDisconnect:
+			slog.Info("vpnmux server received disconnect from client, closing session")
+			_ = s.Close()
+			errCh <- io.EOF
+			return
 		}
 		out <- msg
 	}

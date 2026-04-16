@@ -200,6 +200,7 @@ func (D *RelayHandler) Disconnect() error {
 			if muxClient == nil {
 				return nil
 			}
+			_ = muxClient.SendDisconnect()
 			return muxClient.Close()
 		}(),
 		func() error {

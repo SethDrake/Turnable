@@ -216,13 +216,23 @@ type slogLeveledLogger struct {
 	log *slog.Logger
 }
 
-func (l *slogLeveledLogger) Trace(msg string)                          { l.log.Debug(msg) }
-func (l *slogLeveledLogger) Tracef(format string, args ...interface{}) { l.log.Debug(fmt.Sprintf(format, args...)) }
-func (l *slogLeveledLogger) Debug(msg string)                          { l.log.Debug(msg) }
-func (l *slogLeveledLogger) Debugf(format string, args ...interface{}) { l.log.Debug(fmt.Sprintf(format, args...)) }
-func (l *slogLeveledLogger) Info(msg string)                           { l.log.Info(msg) }
-func (l *slogLeveledLogger) Infof(format string, args ...interface{})  { l.log.Info(fmt.Sprintf(format, args...)) }
-func (l *slogLeveledLogger) Warn(msg string)                           { l.log.Warn(msg) }
-func (l *slogLeveledLogger) Warnf(format string, args ...interface{})  { l.log.Warn(fmt.Sprintf(format, args...)) }
-func (l *slogLeveledLogger) Error(msg string)                          { l.log.Error(msg) }
-func (l *slogLeveledLogger) Errorf(format string, args ...interface{}) { l.log.Error(fmt.Sprintf(format, args...)) }
+func (l *slogLeveledLogger) Trace(msg string) { l.log.Debug(msg) }
+func (l *slogLeveledLogger) Tracef(format string, args ...interface{}) {
+	l.log.Debug(fmt.Sprintf(format, args...))
+}
+func (l *slogLeveledLogger) Debug(msg string) { l.log.Debug(msg) }
+func (l *slogLeveledLogger) Debugf(format string, args ...interface{}) {
+	l.log.Debug(fmt.Sprintf(format, args...))
+}
+func (l *slogLeveledLogger) Info(msg string) { l.log.Info(msg) }
+func (l *slogLeveledLogger) Infof(format string, args ...interface{}) {
+	l.log.Info(fmt.Sprintf(format, args...))
+}
+func (l *slogLeveledLogger) Warn(msg string) { l.log.Warn(msg) }
+func (l *slogLeveledLogger) Warnf(format string, args ...interface{}) {
+	l.log.Warn(fmt.Sprintf(format, args...))
+}
+func (l *slogLeveledLogger) Error(msg string) { l.log.Error(msg) }
+func (l *slogLeveledLogger) Errorf(format string, args ...interface{}) {
+	l.log.Error(fmt.Sprintf(format, args...))
+}

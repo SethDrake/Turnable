@@ -453,6 +453,8 @@ type turnPacketConn struct {
 // Close releases the TURN allocation, client, and base socket.
 func (c *turnPacketConn) Close() error {
 	c.closeOnce.Do(func() {
+		// Close the allocation first so it sends Refresh(lifetime=0) to free it server-side.
+		c.closeErr = c.PacketConn.Close()
 		if c.client != nil {
 			c.client.Close()
 		}

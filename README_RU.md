@@ -22,13 +22,11 @@ sequenceDiagram
 
     loop Трафик
         App->>TC: TCP/UDP данные
-        TC->>TURN: Зашифрованные DTLS-пакеты
-        TURN->>TS: Relay
-        TS->>Dest: Пересылка к назначению
-        Dest-->>TS: Ответ
-        TS->>TURN: Зашифрованные DTLS-пакеты
-        TURN->>TC: Relay
-        TC-->>App: Ответ
+        TC->>TS: Relay
+        TS->>Dest: Пересылка данных
+        Dest-->>TS: TCP/UDP данные
+        TS->>TC: Relay
+        TC-->>App: Пересылка данных
     end
 ```
 
@@ -46,10 +44,9 @@ sequenceDiagram
 
     TC->>SFU: Войти в звонок, найти SSRC основного пира по имени пользователя
     TC->>SFU: SDP-ответ с SSRC основного пира + запуск фейкового скринкаста
-    SFU->>TSM: Пересылка
     TSM-->>TC: ready ack
 
-    TC->>TSM: Config URL (зашифрован)
+    TC->>TSM: auth
     TSM-->>TC: auth ack + SSRC выделенного пира
 
     TC->>SFU: SDP-ответ с SSRC выделенного пира
@@ -59,10 +56,10 @@ sequenceDiagram
     loop Трафик
         App->>TC: TCP/UDP данные
         TC->>TSD: Relay
-        TSD->>Dest: Пересылка
+        TSD->>Dest: Пересылка данных
         Dest-->>TSD: TCP/UDP данные
         TSD->>TC: Relay
-        TC-->>App: Пересылка
+        TC-->>App: Пересылка данных
     end
 ```
 

@@ -22,13 +22,11 @@ sequenceDiagram
 
     loop Traffic
         App->>TC: TCP/UDP data
-        TC->>TURN: Encrypted DTLS packets
-        TURN->>TS: Relay
-        TS->>Dest: Forward to destination
-        Dest-->>TS: Response
-        TS->>TURN: Encrypted DTLS packets
-        TURN->>TC: Relay
-        TC-->>App: Response
+        TC->>TS: Relay
+        TS->>Dest: Forwarded data
+        Dest-->>TS: TCP/UDP data
+        TS->>TC: Relay
+        TC-->>App: Forwarded data
     end
 ```
 
@@ -46,10 +44,9 @@ sequenceDiagram
 
     TC->>SFU: Join call, locate server main peer SSRC by username
     TC->>SFU: SDP response with main peer SSRC + start fake screencast
-    SFU->>TSM: Forward
     TSM-->>TC: ready ack
 
-    TC->>TSM: Config URL (encrypted)
+    TC->>TSM: auth
     TSM-->>TC: auth ack + dedicated peer SSRC
 
     TC->>SFU: SDP response with dedicated peer SSRC
@@ -59,10 +56,10 @@ sequenceDiagram
     loop Traffic
         App->>TC: TCP/UDP data
         TC->>TSD: Relay
-        TSD->>Dest: Forward
+        TSD->>Dest: Forwarded data
         Dest-->>TSD: TCP/UDP data
         TSD->>TC: Relay
-        TC-->>App: Forward
+        TC-->>App: Forwarded data
     end
 ```
 

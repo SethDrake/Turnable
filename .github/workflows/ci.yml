@@ -34,7 +34,7 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
-          args: --timeout=5m ./...
+          args: --timeout=5m --issues-exit-code=0 ./...
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

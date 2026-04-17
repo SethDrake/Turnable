@@ -4,7 +4,7 @@ Turnable is a VPN core that tunnels TCP/UDP traffic through [TURN](https://en.wi
 ---
 
 ## How it works
-There are two methods of establishing a connection with a remote server. Both of them allow to establish multiple TCP/UDP connections via multiplexing, with traffic being spread through multiple peer connections to bypass platform ratelimits.
+There are two methods of establishing a tunnel with a remote server. Both of them allow to establish multiple TCP/UDP connections via multiplexing, with traffic being spread through multiple peer connections to bypass platform ratelimits.
 
 ### Relay - direct tunnel via TURN
 The server allocates a relay address on the platform's TURN server. The client connects to it, and from there the server forwards traffic to the configured destination. Simple and stable, but is usually heavily throttled and can be detected.

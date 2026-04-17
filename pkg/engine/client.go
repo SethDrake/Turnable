@@ -12,11 +12,6 @@ import (
 	"github.com/theairblow/turnable/pkg/internal/connection"
 )
 
-var ErrAlreadyRunning = errors.New("already running")
-
-// ErrNotRunning is returned when Stop is called on an instance that is not running.
-var ErrNotRunning = errors.New("not running")
-
 // VPNClient represents a VPN client.
 type VPNClient struct {
 	Config config.ClientConfig
@@ -42,8 +37,16 @@ func NewVPNClient(cfg config.ClientConfig) *VPNClient {
 // It connects to the relay, opens the local socket, and forwards per-client traffic.
 func (c *VPNClient) Start(tunnelHandler tunnels.Handler) error {
 	if !c.running.CompareAndSwap(false, true) {
-		return ErrAlreadyRunning
+		return errors.New("already running")
 	}
+
+	success := false
+	defer func() {
+		if !success {
+			c.running.Store(false)
+		}
+	}()
+
 	if tunnelHandler == nil {
 		c.running.Store(false)
 		return fmt.Errorf("tunnel handler is required")
@@ -75,14 +78,16 @@ func (c *VPNClient) Start(tunnelHandler tunnels.Handler) error {
 	go c.serveLocal(c.Config.Socket, acceptCh)
 
 	slog.Info("vpn client started", "connection_type", c.Config.Type)
+	success = true
 	return nil
 }
 
 // Stop stops the VPN client.
 func (c *VPNClient) Stop() error {
 	if !c.running.CompareAndSwap(true, false) {
-		return ErrNotRunning
+		return errors.New("not running")
 	}
+
 	slog.Info("stopping vpn client")
 	c.cancel()
 
@@ -90,11 +95,13 @@ func (c *VPNClient) Stop() error {
 	if c.handler != nil {
 		err = c.handler.Disconnect()
 	}
+
 	if err != nil {
 		slog.Warn("vpn client stopped with errors", "error", err)
 	} else {
 		slog.Info("vpn client stopped")
 	}
+
 	return err
 }
 

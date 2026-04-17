@@ -334,11 +334,10 @@ func (D *RelayHandler) connectClientSession() error {
 		return err
 	}
 
-	protoHandler, err := protocol.GetHandler(cfg.Proto)
-	if err != nil {
+	if !protocol.HandlerExists(cfg.Proto) {
 		cancel()
 		_ = platformHandler.Disconnect()
-		return err
+		return fmt.Errorf("protocol handler %s not found", cfg.Proto)
 	}
 
 	turnInfo := platformHandler.GetTURNInfo()
@@ -358,17 +357,19 @@ func (D *RelayHandler) connectClientSession() error {
 
 	go monitorRelayPlatform(watchCtx, events)
 
-	// Connect peer 0 via raw DTLS.
-	peer0Log := slog.With("peer_idx", 0)
-	rawConn0, err := protocol.ConnectRawLog(protoHandler, dest, relayInfo, true, peer0Log)
+	// TODO: make all peers connect at the same time, and the first one that connects should become the primary
+	handler0, _ := protocol.GetHandler(cfg.Proto)
+	handler0.SetLogger(slog.With("peer_idx", 0))
+	ctx, cancel := context.WithTimeout(watchCtx, 5*time.Second)
+	defer cancel()
+
+	rawConn0, err := handler0.Connect(ctx, dest, relayInfo, true)
 	if err != nil {
 		cancel()
 		_ = platformHandler.Disconnect()
 		return fmt.Errorf("peer 0 connect: %w", err)
 	}
 
-	// Per-peer EncryptedTunnel - always used regardless of cfg.Encryption.
-	// In "handshake" mode it is discarded after the handshake; in "full" mode it stays in PeerConn.
 	encTunnel0, err := wrapClientEncryptedStream(rawConn0, cfg.PubKey)
 	if err != nil {
 		_ = rawConn0.Close()
@@ -377,14 +378,15 @@ func (D *RelayHandler) connectClientSession() error {
 		return fmt.Errorf("peer 0 encryption init: %w", err)
 	}
 
-	// Primary handshake - server assigns session UUID.
 	if dc, ok := rawConn0.(interface{ SetDeadline(time.Time) error }); ok {
 		_ = dc.SetDeadline(time.Now().Add(relayHandshakeTimeout))
 	}
+
 	assignedUUID, err := doClientPrimaryHandshake(encTunnel0, cfg.ToURL(true))
 	if dc, ok := rawConn0.(interface{ SetDeadline(time.Time) error }); ok {
 		_ = dc.SetDeadline(time.Time{})
 	}
+
 	if err != nil {
 		_ = rawConn0.Close()
 		cancel()
@@ -394,7 +396,6 @@ func (D *RelayHandler) connectClientSession() error {
 
 	sessionUUIDStr := uuid.UUID(assignedUUID).String()
 
-	// In "full" mode keep the EncryptedTunnel; in "handshake" mode use the raw connection.
 	var conn0 io.ReadWriteCloser
 	if cfg.Encryption == "full" {
 		conn0 = encTunnel0
@@ -405,9 +406,13 @@ func (D *RelayHandler) connectClientSession() error {
 	// Reconnect factory - all peers (including peer 0) reconnect as secondary peers,
 	// since the primary session (KCP/VPNMux) stays alive as long as ≥1 peer is connected.
 	makePeerReconnectFn := func(peerIdx int) func(context.Context) (io.ReadWriteCloser, error) {
-		peerLog := slog.With("peer_idx", peerIdx)
 		return func(ctx context.Context) (io.ReadWriteCloser, error) {
-			rawConn, err := protocol.ConnectRawLog(protoHandler, dest, relayInfo, true, peerLog)
+			handler, _ := protocol.GetHandler(cfg.Proto)
+			handler.SetLogger(slog.With("peer_idx", peerIdx))
+			ctx, cancel := context.WithTimeout(watchCtx, 5*time.Second)
+			defer cancel()
+
+			rawConn, err := handler0.Connect(ctx, dest, relayInfo, true)
 			if err != nil {
 				return nil, err
 			}
@@ -416,13 +421,16 @@ func (D *RelayHandler) connectClientSession() error {
 				_ = rawConn.Close()
 				return nil, err
 			}
+
 			if dc, ok := rawConn.(interface{ SetDeadline(time.Time) error }); ok {
 				_ = dc.SetDeadline(time.Now().Add(relayHandshakeTimeout))
 			}
+
 			handshakeErr := doClientSecondaryHandshake(encTunnel, assignedUUID, cfg.UserUUID, cfg.RouteID)
 			if dc, ok := rawConn.(interface{ SetDeadline(time.Time) error }); ok {
 				_ = dc.SetDeadline(time.Time{})
 			}
+
 			if handshakeErr != nil {
 				_ = rawConn.Close()
 				// Server no longer knows about this session: trigger a full primary reconnect
@@ -432,6 +440,7 @@ func (D *RelayHandler) connectClientSession() error {
 				}
 				return nil, handshakeErr
 			}
+
 			if cfg.Encryption == "full" {
 				return encTunnel, nil
 			}
@@ -447,14 +456,20 @@ func (D *RelayHandler) connectClientSession() error {
 		return err
 	}
 
-	// KCP transport over PeerConn.
-	kcpHandler := &transportpkg.KCPHandler{}
-	muxTransport, err := kcpHandler.WrapPacketConn(peerConn)
+	// Transport layer over PeerConn for reliable stream delivery.
+	handler, err := transportpkg.GetHandler(cfg.Transport)
 	if err != nil {
 		_ = peerConn.Close()
 		cancel()
 		_ = platformHandler.Disconnect()
-		return fmt.Errorf("kcp setup: %w", err)
+		return fmt.Errorf("transport setup: %w", err)
+	}
+	muxTransport, err := handler.WrapClient(peerConn)
+	if err != nil {
+		_ = peerConn.Close()
+		cancel()
+		_ = platformHandler.Disconnect()
+		return fmt.Errorf("transport setup: %w", err)
 	}
 
 	// Plain VPNMux - no auth or encryption at this layer; handled per-peer above.
@@ -469,7 +484,7 @@ func (D *RelayHandler) connectClientSession() error {
 	// Atomically swap in new session state.
 	D.mu.Lock()
 	D.cancel = cancel
-	D.proto = protoHandler
+	D.proto = handler0
 	D.platform = platformHandler
 	D.muxClient = muxClient
 	D.peerConn = peerConn
@@ -597,8 +612,8 @@ func (D *RelayHandler) connectClientSession() error {
 	return nil
 }
 
-// AcceptNewClients emits authenticated relay sessions accepted by the underlying protocol.
-func (D *RelayHandler) AcceptNewClients(ctx context.Context) <-chan ServerClient {
+// AcceptClients emits authenticated relay sessions accepted by the underlying protocol.
+func (D *RelayHandler) AcceptClients(ctx context.Context) <-chan ServerClient {
 	out := make(chan ServerClient)
 
 	D.mu.Lock()
@@ -613,8 +628,13 @@ func (D *RelayHandler) AcceptNewClients(ctx context.Context) <-chan ServerClient
 			return
 		}
 
-		for client := range protoHandler.AcceptNewClients(ctx) {
-			client := client
+		clientCh, err := protoHandler.AcceptClients(ctx)
+		if err != nil {
+			slog.Warn("accept clients failed", "error", err)
+			return
+		}
+
+		for client := range clientCh {
 			go func() {
 				if err := D.handleIncomingPeer(ctx, client, serverCfg, out); err != nil {
 					slog.Warn("relay peer handling failed", "addr", client.Address, "error", err)
@@ -639,6 +659,7 @@ func (D *RelayHandler) handleIncomingPeer(
 	}
 
 	// Every peer gets its own EncryptedTunnel with an independent KEM-derived key.
+	// TODO: fix resource leak
 	encTunnel, err := wrapServerEncryptedStream(client.IO, serverCfg.PrivKey)
 	if err != nil {
 		_ = client.IO.Close()
@@ -733,11 +754,15 @@ func (D *RelayHandler) handlePrimaryPeer(
 	}
 	_ = peerConn.AddPeer(peer0, nil)
 
-	kcpHandler := &transportpkg.KCPHandler{}
-	kcpTransport, err := kcpHandler.WrapPacketConn(peerConn)
+	handler, err := transportpkg.GetHandler(route.Transport)
 	if err != nil {
 		_ = peerConn.Close()
-		return fmt.Errorf("kcp setup: %w", err)
+		return fmt.Errorf("transport setup: %w", err)
+	}
+	kcpTransport, err := handler.WrapServer(peerConn)
+	if err != nil {
+		_ = peerConn.Close()
+		return fmt.Errorf("transport setup: %w", err)
 	}
 	defer func() { _ = kcpTransport.Close() }()
 

@@ -12,7 +12,7 @@ import (
 	"github.com/theairblow/turnable/pkg/internal/connection"
 )
 
-// VPNServer represents a VPN server.
+// VPNServer represents a VPN server
 type VPNServer struct {
 	Config config.ServerConfig
 
@@ -23,7 +23,7 @@ type VPNServer struct {
 	cancel context.CancelFunc
 }
 
-// NewVPNServer creates a new VPN server from the provided ServerConfig.
+// NewVPNServer creates a new VPN server from the provided ServerConfig
 func NewVPNServer(cfg config.ServerConfig) *VPNServer {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &VPNServer{
@@ -36,8 +36,16 @@ func NewVPNServer(cfg config.ServerConfig) *VPNServer {
 // Start starts all enabled server-side connection handlers.
 func (s *VPNServer) Start() error {
 	if !s.running.CompareAndSwap(false, true) {
-		return ErrAlreadyRunning
+		return errors.New("already running")
 	}
+
+	success := false
+	defer func() {
+		if !success {
+			s.running.Store(false)
+		}
+	}()
+
 	if s.Config.P2P.Enabled {
 		s.running.Store(false)
 		return errors.New("P2P mode is not supported")
@@ -60,14 +68,16 @@ func (s *VPNServer) Start() error {
 		go s.acceptClients(connHandler)
 	}
 
+	success = true
 	return nil
 }
 
 // Stop stops the VPN server and all active handlers.
 func (s *VPNServer) Stop() error {
 	if !s.running.CompareAndSwap(true, false) {
-		return ErrNotRunning
+		return errors.New("not running")
 	}
+
 	slog.Info("stopping vpn server", "handlers", len(s.handlers))
 	s.cancel()
 
@@ -81,12 +91,13 @@ func (s *VPNServer) Stop() error {
 	} else {
 		slog.Info("vpn server stopped")
 	}
+
 	return err
 }
 
 // acceptClients consumes authenticated connection-handler clients and forwards each one.
 func (s *VPNServer) acceptClients(handler connection.Handler) {
-	for client := range handler.AcceptNewClients(s.ctx) {
+	for client := range handler.AcceptClients(s.ctx) {
 		if client.Route == nil || client.Config == nil || client.User == nil {
 			slog.Warn("dropping client with incomplete metadata", "addr", client.Address)
 			_ = client.IO.Close()

@@ -2,15 +2,16 @@ package transport
 
 import (
 	"io"
+	"net"
 
 	"github.com/theairblow/turnable/pkg/common"
 )
 
-// Handler provides an optional stream transport layer for reliability
+// Handler represents a stream transport handler
 type Handler interface {
-	ID() string
-	WrapClient(stream io.ReadWriteCloser) (io.ReadWriteCloser, error)
-	WrapServer(stream io.ReadWriteCloser) (io.ReadWriteCloser, error)
+	ID() string                                                 // Returns the unique ID of this handler
+	WrapClient(conn net.PacketConn) (io.ReadWriteCloser, error) // Wraps a client packet connection
+	WrapServer(conn net.PacketConn) (io.ReadWriteCloser, error) // Wraps a server packet connection
 }
 
 // Handlers represents transport handler registry.
@@ -19,6 +20,7 @@ var Handlers = common.NewRegistry[Handler]()
 // init wires the transport registry and registers all built-in handlers.
 func init() {
 	common.TransportsHolder = Handlers
+	Handlers.Register(&NoneHandler{})
 	Handlers.Register(&SCTPHandler{})
 	Handlers.Register(&KCPHandler{})
 }

@@ -18,7 +18,7 @@ type Handler interface {
 	OpenChannel(socketType string) (io.ReadWriteCloser, error)    // Opens a data channel for the given socket type ("tcp"/"udp")
 	Disconnect() error                                            // Gracefully disconnects from the current VPN server
 	Close() error                                                 // Forcibly closes the current VPN server connection
-	AcceptNewClients(ctx context.Context) <-chan ServerClient     // Emits an event for every new client
+	AcceptClients(ctx context.Context) <-chan ServerClient        // Emits an event for every new client
 }
 
 // ServerClient represents a server client's Address and IO

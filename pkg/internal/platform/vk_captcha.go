@@ -38,7 +38,7 @@ var (
 	errCaptchaRateLimit = errors.New("captcha session rate limit reached") // Marks exhausted captcha sessions
 
 	captchaAPIVersion    = "5.131"    // last known version of the captcha API
-	captchaScriptVersion = "1.1.1321" // last known version of the captcha script
+	captchaScriptVersion = "1.1.1322" // last known version of the captcha script
 )
 
 // captchaInit represents window.init JSON object with captcha initialization data

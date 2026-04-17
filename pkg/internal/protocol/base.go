@@ -14,7 +14,7 @@ import (
 // ErrQuotaReached indicates a TURN allocation quota has been exhausted.
 var ErrQuotaReached = errors.New("turn allocation quota reached")
 
-// RelayInfo describes the TURN server used to establish the packet underlay.
+// RelayInfo describes the TURN server used to establish the packet underlay
 type RelayInfo struct {
 	Address   string   // TURN server address
 	Addresses []string // All available TURN server addresses
@@ -22,22 +22,20 @@ type RelayInfo struct {
 	Password  string   // TURN password
 }
 
-// ServerClient represents an accepted client session.
+// ServerClient represents an accepted client session
 type ServerClient struct {
-	Address net.Addr
-	IO      io.ReadWriteCloser
+	Address net.Addr           // Client address
+	IO      io.ReadWriteCloser // IO stream
 }
 
-// Handler manages protocol lifecycle and secure session establishment.
+// Handler represents a protocol handler
 type Handler interface {
-	ID() string
-	Start(config config.ServerConfig) error
-	Stop() error
-	Connect(dest net.Addr, turn RelayInfo, forceTURN bool) (io.ReadWriteCloser, error)
-	ConnectRaw(dest net.Addr, turn RelayInfo, forceTURN bool) (io.ReadWriteCloser, error)
-	Disconnect() error
-	Close() error
-	AcceptNewClients(ctx context.Context) <-chan ServerClient
+	ID() string                                                                                             // Returns the unique ID of this handler
+	Start(config config.ServerConfig) error                                                                 // Starts the server listener
+	Stop() error                                                                                            // Stops the server listener
+	AcceptClients(ctx context.Context) (<-chan ServerClient, error)                                         // Accepts new server clients
+	Connect(ctx context.Context, dest net.Addr, turn RelayInfo, forceTURN bool) (io.ReadWriteCloser, error) // Connects to a remote server directly or via TURN
+	SetLogger(log *slog.Logger)                                                                             // Changes the slog logger instance
 }
 
 // Handlers represents protocol Handler registry.
@@ -62,15 +60,4 @@ func ListHandlers() []string {
 // HandlerExists checks whether a protocol Handler with specified string ID exists.
 func HandlerExists(name string) bool {
 	return Handlers.Exists(name)
-}
-
-// ConnectRawLog calls ConnectRawWithLogger if the handler supports it, otherwise ConnectRaw
-func ConnectRawLog(h Handler, dest net.Addr, relay RelayInfo, forceTURN bool, log *slog.Logger) (io.ReadWriteCloser, error) {
-	type loggable interface {
-		ConnectRawWithLogger(net.Addr, RelayInfo, bool, *slog.Logger) (io.ReadWriteCloser, error)
-	}
-	if lh, ok := h.(loggable); ok && log != nil {
-		return lh.ConnectRawWithLogger(dest, relay, forceTURN, log)
-	}
-	return h.ConnectRaw(dest, relay, forceTURN)
 }

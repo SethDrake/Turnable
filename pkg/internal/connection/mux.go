@@ -525,6 +525,7 @@ func NewVPNMuxServer(transport io.ReadWriteCloser) (*VPNMuxServer, error) {
 		_ = session.Close()
 		return nil, fmt.Errorf("failed to read vpnmux control preface: %w", err)
 	}
+
 	slog.Debug("vpnmux server control preface received")
 	if string(preface) != string(vpnMuxControlMagic) {
 		_ = controlStream.Close()

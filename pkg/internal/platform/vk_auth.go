@@ -300,7 +300,7 @@ func (V *VKHandler) authorizeAnonymous(ctx context.Context) (string, string, err
 				slog.Warn("vk captcha solve failed", "duration_ms", time.Since(solveStartedAt).Milliseconds(), "error", solveErr)
 				if errors.Is(solveErr, errCaptchaRateLimit) {
 					messagesToken = ""
-					slog.Info("vk captcha rate limited, retrying", "delay", 1*time.Second)
+					slog.Info("vk captcha rate limited, retrying", "delay", 5*time.Second)
 					select {
 					case <-ctx.Done():
 						return "", "", ctx.Err()

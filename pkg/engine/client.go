@@ -74,7 +74,7 @@ func (c *VPNClient) Start(tunnelHandler tunnels.Handler) error {
 		return fmt.Errorf("open tunnel: %w", err)
 	}
 
-	go c.acceptClients(c.Config.Socket, acceptCh)
+	go c.acceptClients(acceptCh)
 
 	slog.Info("vpn client started", "connection_type", c.Config.Type)
 	success = true
@@ -105,7 +105,7 @@ func (c *VPNClient) Stop() error {
 }
 
 // acceptClients accepts local clients and handles them
-func (c *VPNClient) acceptClients(socketType string, acceptCh <-chan tunnels.AcceptedClient) {
+func (c *VPNClient) acceptClients(acceptCh <-chan tunnels.AcceptedClient) {
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -114,20 +114,20 @@ func (c *VPNClient) acceptClients(socketType string, acceptCh <-chan tunnels.Acc
 			if !ok {
 				return
 			}
-			go c.handleClient(socketType, client)
+			go c.handleClient(client)
 		}
 	}
 }
 
 // handleClient opens a tinymux channel and pipes the local client through it
-func (c *VPNClient) handleClient(socketType string, local tunnels.AcceptedClient) {
+func (c *VPNClient) handleClient(local tunnels.AcceptedClient) {
 	if c.handler == nil {
 		slog.Warn("no active handler for local client")
 		_ = local.Stream.Close()
 		return
 	}
 
-	channel, err := c.handler.OpenChannel(socketType)
+	channel, err := c.handler.OpenChannel()
 	if err != nil {
 		if !errors.Is(err, connection.ErrReconnecting) {
 			slog.Warn("failed to open channel for local client", "error", err)
@@ -136,6 +136,6 @@ func (c *VPNClient) handleClient(socketType string, local tunnels.AcceptedClient
 		return
 	}
 
-	slog.Debug("piping local client to channel", "socket", socketType)
+	slog.Debug("piping local client to channel")
 	pipeStreams(local.Stream, channel)
 }

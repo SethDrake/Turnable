@@ -11,13 +11,14 @@ import (
 )
 
 const (
-	kcpWindowSize    = 512             // KCP send/receive window size
-	kcpUpdateMs      = 40              // KCP update interval in milliseconds
-	kcpResend        = 2               // Fast resend after 2 duplicate ACKs
-	kcpDisableCC     = 1               // Disable KCP congestion control
-	kcpMTU           = 1418            // DTLS(1440) - encryption overhead(20) - mux header(2)
-	kcpReadWriteBuff = 2 * 1024 * 1024 // Read/write buffer size for the session
-	kcpConversation  = 1               // Conversation ID for this transport channel
+	kcpWindowSize      = 512             // KCP send/receive window size
+	kcpUpdateMs        = 40              // KCP update interval in milliseconds
+	kcpControlUpdateMs = 1               // KCP update interval for control channels
+	kcpResend          = 2               // Fast resend after 2 duplicate ACKs
+	kcpDisableCC       = 1               // Disable KCP congestion control
+	kcpMTU             = 1418            // DTLS MTU excluding the overhead
+	kcpReadWriteBuff   = 2 * 1024 * 1024 // Read/write buffer size for the session
+	kcpConversation    = 1               // Conversation ID for this transport channel
 )
 
 // KCPHandler represents a KCP transport handler
@@ -40,13 +41,23 @@ func (D *KCPHandler) WrapServer(conn net.Conn) (net.Conn, error) {
 
 // WrapKCP initializes a KCP session over a packet-centric net.Conn
 func WrapKCP(conn net.Conn) (net.Conn, error) {
+	return wrapKCPWithInterval(conn, kcpUpdateMs)
+}
+
+// WrapControlKCP initializes a KCP session optimized for control channels that need to drain instantly.
+func WrapControlKCP(conn net.Conn) (net.Conn, error) {
+	return wrapKCPWithInterval(conn, kcpControlUpdateMs)
+}
+
+// wrapKCPWithInterval initializes a KCP session with a given update interval in milliseconds
+func wrapKCPWithInterval(conn net.Conn, intervalMs int) (net.Conn, error) {
 	pc := &connPacketConn{Conn: conn}
 	session, err := kcp.NewConn3(kcpConversation, pc.LocalAddr(), nil, 0, 0, pc)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize kcp session: %w", err)
 	}
 
-	session.SetNoDelay(1, kcpUpdateMs, kcpResend, kcpDisableCC)
+	session.SetNoDelay(1, intervalMs, kcpResend, kcpDisableCC)
 	session.SetWindowSize(kcpWindowSize, kcpWindowSize)
 	session.SetACKNoDelay(true)
 	session.SetStreamMode(true)

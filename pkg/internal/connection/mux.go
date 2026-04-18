@@ -271,11 +271,10 @@ type TinyMuxClient struct {
 
 // NewTinyMuxClient creates a client tinymux connection
 func NewTinyMuxClient(ctx context.Context, conn net.Conn) (*TinyMuxClient, error) {
-	slog.Debug("tinymux client init started")
 	mux := newTinyMuxCore(conn)
 
 	controlFlow := mux.createFlow(0)
-	controlKCP, err := transport.WrapKCP(controlFlow)
+	controlKCP, err := transport.WrapControlKCP(controlFlow)
 	if err != nil {
 		_ = mux.Close()
 		return nil, fmt.Errorf("failed to wrap control channel with kcp: %w", err)
@@ -287,7 +286,6 @@ func NewTinyMuxClient(ctx context.Context, conn net.Conn) (*TinyMuxClient, error
 		return nil, fmt.Errorf("failed to write control preface: %w", err)
 	}
 
-	slog.Debug("tinymux client control preface sent")
 	pingCtx, pingCancel := context.WithCancel(ctx)
 	client := &TinyMuxClient{
 		mux:         mux,
@@ -318,7 +316,7 @@ func (c *TinyMuxClient) pingLoop() {
 			sent := c.lastPingSent.Load()
 			pong := c.lastPong.Load()
 			if pong < sent && time.Since(time.Unix(0, sent)) > muxPingTimeout {
-				slog.Warn("tinymux client pong timeout")
+				slog.Debug("tinymux client pong timeout")
 				c.pingCancel()
 				_ = c.mux.Close()
 				return
@@ -340,7 +338,7 @@ func (c *TinyMuxClient) controlReader() {
 			select {
 			case <-c.pingCtx.Done():
 			default:
-				slog.Debug("tinymux client control reader stopped", "error", err)
+				slog.Debug("tinymux client cut off unexpectedly", "error", err)
 				c.pingCancel()
 				_ = c.mux.Close()
 			}
@@ -359,7 +357,7 @@ func (c *TinyMuxClient) controlReader() {
 				_ = raw.(*managedFlowConn).flowConn.Close()
 			}
 		case muxControlTypeDisconnect:
-			slog.Info("tinymux client received disconnect")
+			slog.Debug("tinymux client received disconnect, triggering full reconnect")
 			c.pingCancel()
 			_ = c.mux.Close()
 			return
@@ -434,11 +432,10 @@ type TinyMuxServer struct {
 
 // NewTinyMuxServer creates a mux server over the provided packet-centric connection
 func NewTinyMuxServer(conn net.Conn) (*TinyMuxServer, error) {
-	slog.Debug("tinymux server init started")
 	mux := newTinyMuxCore(conn)
 
 	controlFlow := mux.createFlow(0)
-	controlKCP, err := transport.WrapKCP(controlFlow)
+	controlKCP, err := transport.WrapControlKCP(controlFlow)
 	if err != nil {
 		_ = mux.Close()
 		return nil, fmt.Errorf("failed to wrap control channel with kcp: %w", err)
@@ -450,12 +447,12 @@ func NewTinyMuxServer(conn net.Conn) (*TinyMuxServer, error) {
 		_ = mux.Close()
 		return nil, fmt.Errorf("failed to read control preface: %w", err)
 	}
-	if string(preface) != string(muxControlMagic) {
+
+	if string(preface) != muxControlMagic {
 		_ = controlKCP.Close()
 		_ = mux.Close()
 		return nil, errors.New("invalid tinymux control preface")
 	}
-	slog.Debug("tinymux server control preface received")
 
 	return &TinyMuxServer{
 		mux:     mux,
@@ -480,6 +477,7 @@ func (s *TinyMuxServer) AcceptChannels(ctx context.Context) <-chan MuxChannel {
 				default:
 					slog.Debug("tinymux server control stopped", "error", err)
 				}
+
 				s.doneOnce.Do(func() { close(s.done) })
 				_ = s.Close()
 				return
@@ -518,13 +516,14 @@ func (s *TinyMuxServer) AcceptChannels(ctx context.Context) <-chan MuxChannel {
 					_ = raw.(*managedFlowConn).flowConn.Close()
 				}
 			case muxControlTypeDisconnect:
-				slog.Info("tinymux server received disconnect")
+				slog.Debug("tinymux server received disconnect")
 				s.doneOnce.Do(func() { close(s.done) })
 				_ = s.Close()
 				return
 			}
 		}
 	}()
+
 	return out
 }
 
@@ -540,7 +539,7 @@ func (s *TinyMuxServer) pingTimeoutLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if time.Since(time.Unix(0, s.lastPing.Load())) > muxPingTimeout {
-				slog.Warn("tinymux server ping timeout")
+				slog.Debug("tinymux server ping timeout")
 				_ = s.Close()
 				return
 			}

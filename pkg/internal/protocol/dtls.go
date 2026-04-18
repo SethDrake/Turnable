@@ -392,13 +392,7 @@ type dtlsClientConn struct {
 func (c *dtlsClientConn) Close() error {
 	var err error
 	c.closeOnce.Do(func() {
-		dtlsErr := c.Conn.Close()
-		underlayErr := c.underlay.Close()
-		if dtlsErr != nil {
-			err = dtlsErr
-			return
-		}
-		err = underlayErr
+		err = errors.Join(c.Conn.Close(), c.underlay.Close())
 	})
 	return err
 }

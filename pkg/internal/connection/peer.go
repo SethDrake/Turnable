@@ -15,15 +15,14 @@ import (
 )
 
 // ErrPeerDone is returned by a reconnectFn to signal that this peer slot should be removed
-// and no further reconnect attempts should be made (e.g. the reconnectFn handled escalation itself).
 var ErrPeerDone = errors.New("peer: done")
 
 const (
-	peerMaxPacket       = 8192             // peerMaxPacket is the maximum packet size read from a peer connection.
-	peerReconnectInit   = 5 * time.Second  // peerReconnectInit is the initial back-off delay before the first peer reconnect attempt.
-	peerReconnectMax    = 8 * time.Second  // peerReconnectMax is the maximum back-off delay between peer reconnect attempts.
-	peerQuotaBackoff    = 30 * time.Second // peerQuotaBackoff is the delay when TURN allocation quota is exhausted.
-	peerIncomingBufSize = 256              // peerIncomingBufSize is the channel buffer size for packets arriving from all peers.
+	peerMaxPacket       = 8192             // peerMaxPacket is the maximum packet size read from a peer connection
+	peerReconnectInit   = 5 * time.Second  // peerReconnectInit is the initial back-off delay before the first peer reconnect attempt
+	peerReconnectMax    = 10 * time.Second // peerReconnectMax is the maximum back-off delay between peer reconnect attempts
+	peerQuotaBackoff    = 10 * time.Second // peerQuotaBackoff is the delay when TURN allocation quota is exhausted
+	peerIncomingBufSize = 256              // peerIncomingBufSize is the channel buffer size for packets arriving from all peers
 )
 
 // peerEntry holds one live connection inside PeerConn
@@ -33,8 +32,7 @@ type peerEntry struct {
 	connected atomic.Bool
 }
 
-// PeerConn aggregates multiple per-peer connections into one logical net.Conn.
-// Writes are round-robined across live peers; reads come from whichever peer delivers first.
+// PeerConn aggregates multiple per-peer connections into one logical net.Conn
 type PeerConn struct {
 	mu       sync.RWMutex
 	peers    []*peerEntry
@@ -43,9 +41,10 @@ type PeerConn struct {
 	cancel   context.CancelFunc
 	writeIdx atomic.Uint64
 	closed   atomic.Bool
+	allGone  atomic.Bool
 
 	log            *slog.Logger
-	onAllPeersGone func() // all peers disconnected callback
+	onAllPeersGone func()
 }
 
 // NewPeerConn creates an empty PeerConn derived from the given context; add peers with AddPeer
@@ -80,6 +79,7 @@ func (m *PeerConn) AddPeer(conn net.Conn, reconnectFn func(context.Context) (net
 	if m.closed.Load() {
 		return errors.New("peer: conn is closed")
 	}
+	m.allGone.Store(false)
 	entry := &peerEntry{conn: conn}
 	entry.connected.Store(true)
 	m.mu.Lock()
@@ -127,6 +127,10 @@ func (m *PeerConn) peerReadLoop(idx int, entry *peerEntry, reconnectFn func(cont
 		entry.connected.Store(false)
 		_ = conn.Close()
 		m.log.Info("peer offline", "peer_idx", idx, "online", m.countOnline(), "total", m.totalSlots(), "error", err)
+		if m.countOnline() == 0 {
+			m.notifyAllPeersGone()
+			return
+		}
 
 		if reconnectFn == nil {
 			m.removePeer(idx)
@@ -196,22 +200,22 @@ func (m *PeerConn) removePeer(idx int) {
 	if idx < len(m.peers) {
 		m.peers[idx] = nil
 	}
-	allGone := true
-	for _, p := range m.peers {
-		if p != nil {
-			allGone = false
-			break
-		}
-	}
-	fn := m.onAllPeersGone
 	m.mu.Unlock()
 
-	if allGone {
-		m.log.Debug("all peers disconnected, closing peer conn")
-		m.cancel()
-		if fn != nil {
-			fn()
-		}
+	if m.countOnline() == 0 {
+		m.notifyAllPeersGone()
+	}
+}
+
+// notifyAllPeersGone closes the peer context and fires the callback once.
+func (m *PeerConn) notifyAllPeersGone() {
+	if !m.allGone.CompareAndSwap(false, true) {
+		return
+	}
+	m.log.Debug("all peers disconnected, closing peer conn")
+	m.cancel()
+	if fn := m.onAllPeersGone; fn != nil {
+		fn()
 	}
 }
 

@@ -2,22 +2,26 @@ package connection
 
 import (
 	"context"
+	"errors"
 	"net"
 
 	"github.com/theairblow/turnable/pkg/common"
 	"github.com/theairblow/turnable/pkg/config"
 )
 
+// ErrReconnecting is returned when a full reconnect is in progress.
+var ErrReconnecting = errors.New("full reconnect is in progress")
+
 // Handler represents a connection handler
 type Handler interface {
-	ID() string                                            // Returns the unique ID of this handler
-	Start(config config.ServerConfig) error                // Starts the VPN server
-	Stop() error                                           // Stops the VPN server
-	Connect(config config.ClientConfig) error              // Connects to a VPN server
-	OpenChannel(socketType string) (net.Conn, error)       // Opens a data channel for the given socket type ("tcp"/"udp")
-	Disconnect() error                                     // Gracefully disconnects from the current VPN server
-	Close() error                                          // Forcibly closes the current VPN server connection
-	AcceptClients(ctx context.Context) <-chan ServerClient // Emits an event for every new client
+	ID() string                                                     // Returns the unique ID of this handler
+	Start(config config.ServerConfig) error                         // Starts the server listener
+	Stop() error                                                    // Stops the server listener
+	Connect(config config.ClientConfig) error                       // Connects to a remote server
+	OpenChannel() (net.Conn, error)                                 // Opens a new logical data channel
+	Disconnect() error                                              // Gracefully disconnects from the current remote server
+	Close() error                                                   // Forcibly closes the current remove server connection
+	AcceptClients(ctx context.Context) (<-chan ServerClient, error) // Accepts and emits new authenticated server clients
 }
 
 // ServerClient represents a server client

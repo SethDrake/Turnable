@@ -96,7 +96,13 @@ func (s *VPNServer) Stop() error {
 
 // acceptClients accepts authenticated clients and handles them
 func (s *VPNServer) acceptClients(handler connection.Handler) {
-	for client := range handler.AcceptClients(s.ctx) {
+	clientCh, err := handler.AcceptClients(s.ctx)
+	if err != nil {
+		slog.Warn("accept clients failed", "error", err)
+		return
+	}
+
+	for client := range clientCh {
 		if client.Route == nil || client.Config == nil || client.User == nil {
 			slog.Warn("dropping client with incomplete metadata", "addr", client.Address)
 			_ = client.Conn.Close()

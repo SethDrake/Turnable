@@ -27,7 +27,7 @@ const (
 	muxControlTypeClose      byte = 4
 	muxControlTypeDisconnect byte = 7
 
-	muxFlowBufSize = 2048
+	muxFlowBufSize = 512
 	muxMaxPacket   = 65535
 
 	muxClientPingInterval = 1 * time.Second

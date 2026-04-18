@@ -22,7 +22,7 @@ const (
 	peerReconnectInit   = 5 * time.Second  // initial back-off delay before the first peer reconnect attempt
 	peerReconnectMax    = 10 * time.Second // maximum back-off delay between peer reconnect attempts
 	peerQuotaBackoff    = 10 * time.Second // delay when TURN allocation quota is exhausted
-	peerIncomingBufSize = 2048             // channel buffer size for packets arriving from all peers
+	peerIncomingBufSize = 256              // channel buffer size for packets arriving from all peers
 )
 
 // peerEntry holds one live connection inside PeerConn

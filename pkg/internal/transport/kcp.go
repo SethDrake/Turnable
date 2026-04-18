@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	kcpWindowSize      = 4096            // KCP send/receive window size
-	kcpUpdateMs        = 10              // KCP update interval in milliseconds
+	kcpWindowSize      = 1024            // KCP send/receive window size
+	kcpUpdateMs        = 20              // KCP update interval in milliseconds
 	kcpControlUpdateMs = 1               // KCP update interval for control channels
 	kcpResend          = 2               // Fast resend after 2 duplicate ACKs
 	kcpDisableCC       = 1               // Disable KCP congestion control

@@ -18,11 +18,11 @@ import (
 var ErrPeerDone = errors.New("peer: done")
 
 const (
-	peerMaxPacket       = 8192             // peerMaxPacket is the maximum packet size read from a peer connection
-	peerReconnectInit   = 5 * time.Second  // peerReconnectInit is the initial back-off delay before the first peer reconnect attempt
-	peerReconnectMax    = 10 * time.Second // peerReconnectMax is the maximum back-off delay between peer reconnect attempts
-	peerQuotaBackoff    = 10 * time.Second // peerQuotaBackoff is the delay when TURN allocation quota is exhausted
-	peerIncomingBufSize = 256              // peerIncomingBufSize is the channel buffer size for packets arriving from all peers
+	peerMaxPacket       = 8192             // maximum packet size read from a peer connection
+	peerReconnectInit   = 5 * time.Second  // initial back-off delay before the first peer reconnect attempt
+	peerReconnectMax    = 10 * time.Second // maximum back-off delay between peer reconnect attempts
+	peerQuotaBackoff    = 10 * time.Second // delay when TURN allocation quota is exhausted
+	peerIncomingBufSize = 2048             // channel buffer size for packets arriving from all peers
 )
 
 // peerEntry holds one live connection inside PeerConn

@@ -771,6 +771,7 @@ func (D *RelayHandler) handlePrimaryPeer(
 ) error {
 	configJSON, err := parsePrimaryHello(helloPayload)
 	if err != nil {
+		_ = writePrimaryAck(encConn, [16]byte{}, err.Error())
 		_ = encConn.Close()
 		return fmt.Errorf("parse primary hello: %w", err)
 	}

@@ -17,6 +17,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/theairblow/turnable/pkg/common"
 )
 
 const manualCaptchaTimeout = 60 * time.Second
@@ -255,10 +257,15 @@ func (V *VKHandler) solveManualCaptcha(ctx context.Context, apiErr vkAPIError) (
 	keyCh := make(chan string, 1)
 
 	transport := &http.Transport{
-		MaxIdleConns:        100,
-		IdleConnTimeout:     90 * time.Second,
-		TLSHandshakeTimeout: 10 * time.Second,
-		ForceAttemptHTTP2:   false,
+		DialContext:           common.ResolverDialContext(),
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 20 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		MaxIdleConns:          32,
+		MaxIdleConnsPerHost:   8,
+		IdleConnTimeout:       90 * time.Second,
+		DisableCompression:    false,
+		ForceAttemptHTTP2:     false,
 	}
 
 	proxy := &httputil.ReverseProxy{

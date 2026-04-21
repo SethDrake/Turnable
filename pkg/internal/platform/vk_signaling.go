@@ -66,21 +66,6 @@ func (V *VKHandler) Connect() error {
 	header.Set("Origin", "https://vk.com")
 	header.Set("User-Agent", profile.UserAgent)
 
-	// Chromium websocket captures show these query params are always present and appear to
-	// influence backend behavior/validation.
-	if parsed, err := url.Parse(endpoint); err == nil {
-		q := parsed.Query()
-		q.Set("platform", "WEB")
-		q.Set("appVersion", "1.1")
-		q.Set("version", "5")
-		q.Set("device", "browser")
-		q.Set("capabilities", "2F7F")
-		q.Set("clientType", "VK")
-		q.Set("tgt", "retry")
-		parsed.RawQuery = q.Encode()
-		endpoint = parsed.String()
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 

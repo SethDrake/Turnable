@@ -189,7 +189,7 @@ Flags:
   -V, --verbose         enable verbose debug logging
 ```
 
-#### 5. Generate client config URLs
+#### 5. Generate client config
 ```bash
 ./turnable config <route-id> <user-uuid>
 # turnable://user:pass@vk.com/https?pub_key=...&type=relay&...
@@ -198,27 +198,32 @@ Flags:
 ```
 Flags:
   -c, --config string   server config JSON file path (default "config.json")
+  -j, --json            output config in json format
   -s, --store string    server user/route store JSON file path (default "store.json")
 ```
 
-This config URL is the only thing you need to provide to your users.
+Produced config URL or JSON is the only thing you need to provide to your users.
 
 ---
 
 ### Client
 Setting up a Turnable client is almost effortless. On android, its recommended that you use [Termux](https://f-droid.org/en/packages/com.termux/). Keep in mind that Turnable is just a tunnel - you still need to set up a VPN/Proxy client. It is recommended that you use [WireGuard](https://www.wireguard.com/quickstart/).
 
-#### 1. Obtain your config URL from the server admin
+#### 1. Obtain your config from the server admin
 #### 2. Start the client
 ```bash
-./turnable client -l 127.0.0.1:1080 <config-url>
+./turnable client -l 127.0.0.1:1080 [config-url]
 ```
 
 ```
 Flags:
-  -l, --listen string   local TCP/UDP listen address (default "127.0.0.1:0")
-  -V, --verbose         enable verbose debug logging
+  -c, --config string    client config JSON file path (default "config.json")
+  -l, --listen string    local TCP/UDP listen address (ip:port) (default "127.0.0.1:0")
+  -i, --no-interactive   disable interactive mode
+  -V, --verbose          enable verbose debug logging
 ```
+
+You can either specify a path to the JSON file, or the configuration URL.
 
 #### 3. Point your app at the local address
 Configure your proxy/VPN client application to use `127.0.0.1:1080` (or whatever address you chose)

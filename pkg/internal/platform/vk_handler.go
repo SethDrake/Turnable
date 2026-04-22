@@ -26,7 +26,7 @@ const (
 	vkAPIVersion      = "5.275"                        // VK API version used by this client
 	vkCallsAppKey     = "CGMMEJLGDIHBABABA"            // VK calls application key
 	vkCallsClientVer  = "1.1"                          // VK calls client version
-	vkCaptchaRetries  = 3                              // Max number of captcha retry attempts
+	vkCaptchaRetries  = 0                              // Max number of captcha retry attempts
 	vkVideoTrackSlots = 36                             // Maximum video track slots reported to VK
 )
 

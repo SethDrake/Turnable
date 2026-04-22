@@ -28,7 +28,7 @@ import (
 )
 
 var (
-	deviceInfo = `{"screenWidth":1920,"screenHeight":1080,"screenAvailWidth":1920,"screenAvailHeight":1036,"innerWidth":1920,"innerHeight":949,"devicePixelRatio":1,"language":"en-US","languages":["en-US"],"webdriver":false,"hardwareConcurrency":12,"deviceMemory":8,"connectionEffectiveType":"4g","notificationsPermission":"denied"}`
+	deviceInfo = `{"screenWidth":1920,"screenHeight":1080,"screenAvailWidth":1920,"screenAvailHeight":1080,"innerWidth":1920,"innerHeight":951,"devicePixelRatio":1,"language":"en-US","languages":["en-US","en"],"webdriver":false,"hardwareConcurrency":8,"notificationsPermission":"denied"}`
 
 	reCaptchaPowInput   = regexp.MustCompile(`const\s+powInput\s*=\s*"([^"]+)"`)             // Extracts PoW input from captcha HTML
 	reCaptchaDifficulty = regexp.MustCompile(`const\s+difficulty\s*=\s*(\d+)`)               // Extracts PoW difficulty from captcha HTML
@@ -400,18 +400,12 @@ func (V *VKHandler) solveCheckboxCaptcha(
 	select {
 	case <-ctx.Done():
 		return "", ctx.Err()
-	case <-time.After(time.Duration(300+rand.Intn(250)) * time.Millisecond):
+	case <-time.After(time.Duration(400+rand.Intn(250)) * time.Millisecond):
 	}
 
-	/*
-		type pt struct {
-			X int `json:"x"`
-			Y int `json:"y"`
-		}
-		cursor, _ := json.Marshal([]pt{{X: 920 + rand.Intn(20), Y: 560 + rand.Intn(20)}})
-	*/
-
-	cursor := "[]" // this works somehow kek
+	cursor := fmt.Sprintf(`[{"x":%d,"y":%d},{"x":%d,"y":%d}]`,
+		920+rand.Intn(20), 540+rand.Intn(20),
+		950+rand.Intn(20), 530+rand.Intn(20))
 
 	check, err := V.performCaptchaCheck(ctx, sessionToken, adFP, browserFP, hash, "{}", cursor, debugInfo)
 	if err != nil {

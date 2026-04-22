@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -236,6 +237,11 @@ func (V *VKHandler) Authorize(callID string, username string, interactive bool) 
 
 // authorizeAnonymous performs the full VK anonymous auth flow, returning the messages token and call token
 func (V *VKHandler) authorizeAnonymous(ctx context.Context, joinURL, username string) (string, string, error) {
+	if os.Getenv("VK_FORCE_MANUAL") == "1" {
+		slog.Info("vk captcha manual solve forced")
+		return V.solveManualCaptcha(ctx, joinURL)
+	}
+
 	slog.Debug("vk authorize anonymous started")
 
 	var (
@@ -287,13 +293,7 @@ func (V *VKHandler) authorizeAnonymous(ctx context.Context, joinURL, username st
 			slog.Info("vk captcha challenge received", "request_attempt", attempt+1, "max_attempts", vkCaptchaRetries)
 
 			solveStartedAt := time.Now()
-			var successToken string
-			var solveErr error
-			if attempt+1 == vkCaptchaRetries {
-				successToken, solveErr = V.solveManualCaptcha(ctx, apiErr)
-			} else {
-				successToken, solveErr = V.solveCaptchaWithRetry(ctx, apiErr)
-			}
+			successToken, solveErr := V.solveCaptchaWithRetry(ctx, apiErr)
 
 			if solveErr != nil {
 				slog.Warn("vk captcha solve failed", "duration_ms", time.Since(solveStartedAt).Milliseconds(), "error", solveErr)
@@ -329,7 +329,8 @@ func (V *VKHandler) authorizeAnonymous(ctx context.Context, joinURL, username st
 		return messagesToken, token, nil
 	}
 
-	return "", "", errors.New("failed to obtain anonymous call token")
+	slog.Info("all auto captcha attempts exhausted, falling back to manual solve")
+	return V.solveManualCaptcha(ctx, joinURL)
 }
 
 // callsLogin creates an anonymous calls session in the VK calls backend

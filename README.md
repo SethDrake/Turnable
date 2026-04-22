@@ -232,9 +232,9 @@ Configure your proxy/VPN client application to use `127.0.0.1:1080` (or whatever
 
 ## Reference
 ### Platforms
-| ID       | Description                                                                                                                                                                                                                                                               |
-|----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `vk.com` | Authenticates anonymously through [VKontakte](https://vk.com) and joins a meeting. You can find call IDs of meetings created by others by searching [`"vk.com/call/join"` on Google](https://www.google.com/search?q=%22https%253A%252F%252Fvk.com%252Fcall%252Fjoin%22). |
+| ID       | Description                                                                                                   |
+|----------|---------------------------------------------------------------------------------------------------------------|
+| `vk.com` | Authenticates anonymously through [VKontakte](https://vk.com) and joins a meeting. [Usage guide](docs/VK.md). |
 
 ### Connection types
 | Type    | Description                                                                                                          |

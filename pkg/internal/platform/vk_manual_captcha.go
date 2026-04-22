@@ -41,6 +41,9 @@ func (V *VKHandler) solveManualCaptcha(ctx context.Context, joinURL string) (str
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		_, _ = w.Write(vkCaptchaUserScript)
 	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://github.com/TheAirBlow/Turnable/blob/main/docs/VK.md", http.StatusFound)
+	})
 	mux.HandleFunc("/done", func(w http.ResponseWriter, r *http.Request) {
 		mToken := r.URL.Query().Get("messages")
 		aToken := r.URL.Query().Get("calls")

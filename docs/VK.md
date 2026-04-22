@@ -24,8 +24,9 @@ Afterward, copy the `userscript` URL from the log line and open it in your brows
 Click the install button.
 
 ### 2.2. Finish the captcha
-Now proceed to the `url` URL and finish the captcha manually. The userscript will automatically click the Join button for you, and will redirect you off of VK once it successfully captures all the necessary tokens. If you are logged in, use Incognito.
+Now proceed to the `url` URL and finish the captcha manually. The userscript will automatically click the Join button for you, and will redirect you off of VK once it successfully captures all the necessary tokens. 
 
+If you are logged in, use Incognito. If you are on Android and have the VK app intalled, use Incognito as well, as otherwise it would redirect you to it. Enable desktop mode.
 
 ## 3. PROFIT!
 That is all you need to do.

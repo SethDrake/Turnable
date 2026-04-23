@@ -15,7 +15,6 @@ import (
 	"log/slog"
 	"math"
 	"math/rand"
-	"net/http"
 	"regexp"
 	"runtime"
 	"sort"
@@ -23,6 +22,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	http "github.com/useflyent/fhttp"
 
 	"github.com/theairblow/turnable/pkg/common"
 )
@@ -403,9 +404,13 @@ func (V *VKHandler) solveCheckboxCaptcha(
 	case <-time.After(time.Duration(400+rand.Intn(250)) * time.Millisecond):
 	}
 
-	cursor := fmt.Sprintf(`[{"x":%d,"y":%d},{"x":%d,"y":%d}]`,
-		920+rand.Intn(20), 540+rand.Intn(20),
-		950+rand.Intn(20), 530+rand.Intn(20))
+	/*
+		cursor := fmt.Sprintf(`[{"x":%d,"y":%d},{"x":%d,"y":%d}]`,
+			920+rand.Intn(20), 540+rand.Intn(20),
+			950+rand.Intn(20), 530+rand.Intn(20))
+	*/
+
+	cursor := "[]"
 
 	check, err := V.performCaptchaCheck(ctx, sessionToken, adFP, browserFP, hash, "{}", cursor, debugInfo)
 	if err != nil {

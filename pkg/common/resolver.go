@@ -5,9 +5,9 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	http "github.com/useflyent/fhttp"
 	"io"
 	"net"
-	"net/http"
 	"sync/atomic"
 	"time"
 

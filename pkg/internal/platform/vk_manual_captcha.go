@@ -7,10 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"net/http"
 	"os/exec"
 	"runtime"
 	"time"
+
+	http "github.com/useflyent/fhttp"
 )
 
 //go:embed vk_manual_captcha.user.js

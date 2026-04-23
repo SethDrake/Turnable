@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"net/http"
 	"strconv"
 	"strings"
+
+	http "github.com/useflyent/fhttp"
 
 	"github.com/theairblow/turnable/pkg/common"
 )
@@ -102,6 +103,32 @@ func (V *VKHandler) postVKFormRaw(ctx context.Context, method, endpoint string, 
 	}
 	for k, v := range extraHeaders {
 		req.Header.Set(k, v)
+	}
+
+	req.Header[http.HeaderOrderKey] = []string{
+		"host",
+		"content-length",
+		"sec-ch-ua-platform",
+		"accept-language",
+		"sec-ch-ua",
+		"content-type",
+		"sec-ch-ua-mobile",
+		"user-agent",
+		"accept",
+		"origin",
+		"sec-fetch-site",
+		"sec-fetch-mode",
+		"sec-fetch-dest",
+		"referer",
+		"accept-encoding",
+		"priority",
+	}
+
+	req.Header[http.PHeaderOrderKey] = []string{
+		":method",
+		":path",
+		":authority",
+		":scheme",
 	}
 
 	resp, err := httpClient.Do(req)

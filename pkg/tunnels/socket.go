@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/theairblow/turnable/pkg/common"
 	"github.com/theairblow/turnable/pkg/config"
 )
 
@@ -41,7 +42,7 @@ func (S *SocketHandler) Open(ctx context.Context, socketType string) (<-chan Acc
 // Connect dials a remote TCP or UDP address from the route
 func (S *SocketHandler) Connect(ctx context.Context, route *config.Route) (net.Conn, error) {
 	address := net.JoinHostPort(route.Address, fmt.Sprintf("%d", route.Port))
-	conn, err := (&net.Dialer{}).DialContext(ctx, strings.ToLower(route.Socket), address)
+	conn, err := common.ResolverDialContext()(ctx, strings.ToLower(route.Socket), address)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to %s route: %w", route.Socket, err)
 	}

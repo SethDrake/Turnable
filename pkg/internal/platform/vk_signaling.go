@@ -69,7 +69,11 @@ func (V *VKHandler) Connect() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, endpoint, header)
+	wsDialer := &websocket.Dialer{
+		NetDialContext:   common.ResolverDialContext(),
+		HandshakeTimeout: 45 * time.Second,
+	}
+	conn, _, err := wsDialer.DialContext(ctx, endpoint, header)
 	if err != nil {
 		slog.Warn("vk signaling websocket dial failed", "error", err)
 		return err

@@ -142,7 +142,7 @@ func (D *DirectHandler) connectSession() error {
 	}
 
 	turnInfo := platformHandler.GetTURNInfo()
-	dest, err := net.ResolveUDPAddr("udp", cfg.Gateway)
+	dest, err := common.ResolveUDPAddr(cfg.Gateway)
 	if err != nil {
 		sessionCancel()
 		_ = platformHandler.Disconnect()

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -206,6 +207,29 @@ func Lookup(host string) ([]net.IP, error) {
 		return ips, nil
 	}
 	return nil, fmt.Errorf("lookup %q: %w", host, lastErr)
+}
+
+// ResolveUDPAddr resolves addr to a *net.UDPAddr using the DoH resolver for hostname lookup
+func ResolveUDPAddr(addr string) (*net.UDPAddr, error) {
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid port %q: %w", portStr, err)
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return &net.UDPAddr{IP: ip, Port: port}, nil
+	}
+	ips, err := Lookup(host)
+	if err != nil {
+		return nil, err
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("no addresses for %s", host)
+	}
+	return &net.UDPAddr{IP: ips[0], Port: port}, nil
 }
 
 // ResolverDialContext returns a DialContext function that uses the global DNS resolver

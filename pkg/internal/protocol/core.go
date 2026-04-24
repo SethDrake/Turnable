@@ -11,13 +11,14 @@ import (
 
 	pionlog "github.com/pion/logging"
 	"github.com/pion/turn/v5"
+	"github.com/theairblow/turnable/pkg/common"
 )
 
 // openDirectUnderlay opens an unconnected UDP socket
 func openDirectUnderlay(dest net.Addr, proto string, log *slog.Logger) (net.PacketConn, net.Addr, error) {
 	udpAddr, ok := dest.(*net.UDPAddr)
 	if !ok {
-		resolved, err := net.ResolveUDPAddr("udp", dest.String())
+		resolved, err := common.ResolveUDPAddr(dest.String())
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to resolve udp destination: %w", err)
 		}
@@ -49,6 +50,13 @@ func openTURNUnderlay(relay RelayInfo, dest net.Addr, proto string, log *slog.Lo
 		return nil, nil, fmt.Errorf("%s turn requires turn password", proto)
 	}
 
+	turnAddr := relay.Address
+	if host, portStr, err := net.SplitHostPort(relay.Address); err == nil && net.ParseIP(host) == nil {
+		if ips, err := common.Lookup(host); err == nil && len(ips) > 0 {
+			turnAddr = net.JoinHostPort(ips[0].String(), portStr)
+		}
+	}
+
 	network := "udp4"
 	if udpAddr, ok := dest.(*net.UDPAddr); ok && udpAddr.IP != nil && udpAddr.IP.To4() == nil {
 		network = "udp6"
@@ -58,13 +66,13 @@ func openTURNUnderlay(relay RelayInfo, dest net.Addr, proto string, log *slog.Lo
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open local udp socket for turn: %w", err)
 	}
-	log.Debug("turn base socket opened", "proto", proto, "network", network, "local", underlay.LocalAddr().String(), "turn_server", relay.Address)
+	log.Debug("turn base socket opened", "proto", proto, "network", network, "local", underlay.LocalAddr().String(), "turn_server", turnAddr)
 
 	infoLevel := slog.LevelInfo
 	var connRef atomic.Pointer[turnPacketConn]
 	client, err := turn.NewClient(&turn.ClientConfig{
-		STUNServerAddr: relay.Address,
-		TURNServerAddr: relay.Address,
+		STUNServerAddr: turnAddr,
+		TURNServerAddr: turnAddr,
 		Username:       relay.Username,
 		Password:       relay.Password,
 		Conn:           underlay,

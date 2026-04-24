@@ -213,7 +213,7 @@ Flags:
 #### 5. Generate client config
 ```bash
 ./turnable config <route-id> <user-uuid>
-# turnable://user:pass@vk.com/https?pub_key=...&type=relay&...
+# turnable://uuid:call@vk.com/route?pub_key=...
 ```
 
 ```
@@ -230,7 +230,18 @@ Produced config URL or JSON is the only thing you need to provide to your users.
 ### Client
 Setting up a Turnable client is almost effortless. On android, its recommended that you use [Termux](https://f-droid.org/en/packages/com.termux/). Keep in mind that Turnable is just a tunnel - you still need to set up a VPN/Proxy client. It is recommended that you use [WireGuard](https://www.wireguard.com/quickstart/).
 
-#### 1. Obtain your config from the server admin
+#### 1. Obtain a client config
+##### 1.1. With intermediary
+Ask a Turnable server operator for a client config.
+
+##### 1.2. Direct relay
+If you would like to, you can directly connect to a remote UDP server if you do not care about stability, fast recovery, muxing, encryption, user management or anything that a Turnable server provides. **⚠️ Not recommended and is dangerous to use.**
+
+```bash
+./turnable direct-config <platform-id> <call-id> <username> <gateway-addr> -n [peers]
+# turnable://INSECURE-DIRECT-RELAY:call@vk.com/?username=...&type=direct&...
+```
+
 #### 2. Start the client
 ```bash
 ./turnable client -l 127.0.0.1:1080 [config-url]
@@ -274,6 +285,7 @@ Configure your proxy/VPN client application to use `127.0.0.1:1080` (or whatever
 ### Transports
 | Transport | Description                                                                                                                                      |
 |-----------|--------------------------------------------------------------------------------------------------------------------------------------------------|
+| `none`    | No transport protocol at all. Only use for UDP routes.                                                                                           |
 | `kcp`     | [KCP](https://github.com/xtaci/kcp-go) - reliable and stable ordered stream over UDP. Recommended for TCP routes.                                |
 | `sctp`    | [SCTP](https://en.wikipedia.org/wiki/Stream_Control_Transmission_Protocol) - good enough, but not really ideal for our usecase. Not recommended. |
 

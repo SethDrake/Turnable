@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/theairblow/turnable/pkg/common"
 	"github.com/theairblow/turnable/pkg/config"
+	platformpkg "github.com/theairblow/turnable/pkg/internal/platform"
 	"github.com/theairblow/turnable/pkg/internal/protocol"
 )
 
@@ -111,17 +113,55 @@ func (D *DirectHandler) connectSession() error {
 		return errors.New("direct: no client config")
 	}
 
+	platformHandler, err := platformpkg.GetHandler(cfg.PlatformID)
+	if err != nil {
+		return err
+	}
+	if err := platformHandler.Authorize(cfg.CallID, cfg.Username, cfg.Interactive); err != nil {
+		return err
+	}
+
+	if os.Getenv("QUIT_AFTER_AUTH") == "1" {
+		slog.Info("QUIT_AFTER_AUTH set, quitting...")
+		os.Exit(0)
+	}
+
+	sessionCtx, sessionCancel := context.WithCancel(D.reconnectCtx)
+	events := platformHandler.WatchEvents(sessionCtx)
+
+	if err := platformHandler.Connect(); err != nil {
+		sessionCancel()
+		_ = platformHandler.Close()
+		return err
+	}
+
+	if !protocol.HandlerExists(cfg.Proto) {
+		sessionCancel()
+		_ = platformHandler.Disconnect()
+		return fmt.Errorf("protocol handler %s not found", cfg.Proto)
+	}
+
+	turnInfo := platformHandler.GetTURNInfo()
 	dest, err := net.ResolveUDPAddr("udp", cfg.Gateway)
 	if err != nil {
-		return fmt.Errorf("invalid gateway %q: %w", cfg.Gateway, err)
+		sessionCancel()
+		_ = platformHandler.Disconnect()
+		return fmt.Errorf("invalid relay gateway %q: %w", cfg.Gateway, err)
 	}
+
+	relayInfo := protocol.RelayInfo{
+		Address:   turnInfo.Address,
+		Addresses: append([]string(nil), turnInfo.Addresses...),
+		Username:  turnInfo.Username,
+		Password:  turnInfo.Password,
+	}
+
+	go directWatchPlatform(sessionCtx, events)
 
 	numPeers := cfg.Peers
 	if numPeers < 1 {
 		numPeers = 1
 	}
-
-	ctx, cancel := context.WithCancel(D.reconnectCtx)
 
 	fullReconnect := func(reason string) {
 		if !D.reconnecting.CompareAndSwap(false, true) {
@@ -132,7 +172,7 @@ func (D *DirectHandler) connectSession() error {
 			delay := fullReconnectInit
 			slog.Info("direct: starting full reconnect", "reason", reason, "delay", delay)
 			select {
-			case <-ctx.Done():
+			case <-sessionCtx.Done():
 				return
 			case <-time.After(delay):
 			}
@@ -156,34 +196,51 @@ func (D *DirectHandler) connectSession() error {
 		}()
 	}
 
-	noneHandler, err := protocol.GetHandler("none")
-	if err != nil {
-		cancel()
-		return fmt.Errorf("direct: none protocol not found: %w", err)
-	}
-
-	dial := func(dialCtx context.Context) (net.Conn, error) {
+	dial := func(idx int, dialCtx context.Context) (net.Conn, error) {
+		h, _ := protocol.GetHandler("none")
+		h.SetLogger(slog.With("peer_idx", idx))
 		connCtx, connCancel := context.WithTimeout(dialCtx, 5*time.Second)
 		defer connCancel()
-		return noneHandler.Connect(connCtx, dest, protocol.RelayInfo{}, false)
+		return h.Connect(connCtx, dest, relayInfo, true)
 	}
 
-	peerConn := NewPeerConn(ctx)
+	peerConn := NewPeerConn(sessionCtx)
 	peerConn.SetOnAllPeersGone(func() { fullReconnect("all peers disconnected") })
 
-	for i := 0; i < numPeers; i++ {
-		conn, err := dial(ctx)
-		if err != nil {
-			_ = peerConn.Close()
-			cancel()
-			return fmt.Errorf("direct: peer %d connect failed: %w", i, err)
-		}
-		_ = peerConn.AddPeer(conn, func(peerCtx context.Context) (net.Conn, error) {
-			return dial(peerCtx)
-		})
+	for idx := 0; idx < numPeers; idx++ {
+		go func() {
+			delay := peerReconnectInit
+			for {
+				raw, err := dial(idx, sessionCtx)
+				if err != nil {
+					if sessionCtx.Err() != nil {
+						return
+					}
+					if errors.Is(err, protocol.ErrQuotaReached) {
+						slog.Warn("peer quota reached, backing off", "peer_idx", idx, "delay", peerQuotaBackoff)
+						delay = peerQuotaBackoff
+					}
+
+					slog.Warn("peer connect failed", "peer_idx", idx, "error", err, "delay", delay)
+					select {
+					case <-sessionCtx.Done():
+						return
+					case <-time.After(delay):
+					}
+
+					delay = min(delay*2, peerReconnectMax)
+					continue
+				}
+
+				_ = peerConn.AddPeer(raw, func(peerCtx context.Context) (net.Conn, error) {
+					return dial(idx, peerCtx)
+				})
+				break
+			}
+		}()
 	}
 
-	D.cancel = cancel
+	D.cancel = sessionCancel
 	D.peerConn = peerConn
 	slog.Info("direct session connected", "gateway", cfg.Gateway, "peers", numPeers)
 	return nil
@@ -232,4 +289,22 @@ func (D *DirectHandler) Disconnect() error {
 // Close forcibly closes the connection
 func (D *DirectHandler) Close() error {
 	return D.Disconnect()
+}
+
+// directWatchPlatform watches platform signaling events
+func directWatchPlatform(ctx context.Context, events <-chan platformpkg.Event) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-events:
+			if !ok {
+				slog.Debug("direct signaling monitor stopped: event stream closed")
+				return
+			}
+			if event.Type == platformpkg.EventCallEnded {
+				slog.Debug("direct signaling reported call ended", "metadata", event.Metadata)
+			}
+		}
+	}
 }

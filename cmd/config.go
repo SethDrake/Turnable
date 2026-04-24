@@ -19,16 +19,26 @@ type configOptions struct {
 	json       bool
 }
 
+// directConfigOptions holds CLI flags for the direct relay config subcommand
+type directConfigOptions struct {
+	platformId string
+	callId     string
+	username   string
+	gateway    string
+	peers      int
+	json       bool
+}
+
 // newConfigCommand creates the config cobra command
 func newConfigCommand() *cobra.Command {
 	opts := &configOptions{}
 
 	cmd := &cobra.Command{
 		Use:   "config <route-id> <user-uuid>",
-		Short: "Generate a client config URL",
+		Short: "Generates a client config",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 2 {
-				return errors.New("expected exactly two positional arguments: <route-id> <user-uuid>")
+				return errors.New("expected exactly 2 positional arguments")
 			}
 			opts.routeID = args[0]
 			opts.userUUID = args[1]
@@ -42,7 +52,31 @@ func newConfigCommand() *cobra.Command {
 	return cmd
 }
 
-// serverMain runs the config command
+// newDirectConfigCommand creates the direct relay config cobra command
+func newDirectConfigCommand() *cobra.Command {
+	opts := &directConfigOptions{}
+
+	cmd := &cobra.Command{
+		Use:   "direct-config <platform-id> <call-id> <username> <gateway-addr>",
+		Short: "Generates a direct relay connection client config",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 4 {
+				return errors.New("expected exactly 4 positional arguments")
+			}
+			opts.platformId = args[0]
+			opts.callId = args[1]
+			opts.username = args[2]
+			opts.gateway = args[3]
+			return directConfigMain(opts)
+		},
+	}
+
+	cmd.Flags().IntVarP(&opts.peers, "peers", "n", 1, "how many peer connections to use")
+	cmd.Flags().BoolVarP(&opts.json, "json", "j", false, "output config in json format")
+	return cmd
+}
+
+// configMain runs the config command
 func configMain(opts *configOptions) error {
 	storeData, err := os.ReadFile(opts.storePath)
 	if err != nil {
@@ -80,6 +114,37 @@ func configMain(opts *configOptions) error {
 	clientCfg, err := serverCfg.GetClientConfig(user, route)
 	if err != nil {
 		return fmt.Errorf("failed to generate client config: %w", err)
+	}
+
+	if err := clientCfg.Validate(); err != nil {
+		return fmt.Errorf("failed to validate client config: %w", err)
+	}
+
+	if opts.json {
+		fmt.Println(clientCfg.ToJSON(false))
+	} else {
+		fmt.Println(clientCfg.ToURL())
+	}
+
+	return nil
+}
+
+// directConfigMain runs the direct relay config command
+func directConfigMain(opts *directConfigOptions) error {
+	clientCfg := configpkg.ClientConfig{
+		UserUUID:   "INSECURE-DIRECT-RELAY",
+		PlatformID: opts.platformId,
+		CallID:     opts.callId,
+		Username:   opts.username,
+		Gateway:    opts.gateway,
+		Peers:      opts.peers,
+		Socket:     "udp",
+		Type:       "direct",
+		Proto:      "none",
+	}
+
+	if err := clientCfg.Validate(); err != nil {
+		return fmt.Errorf("failed to validate client config: %w", err)
 	}
 
 	if opts.json {

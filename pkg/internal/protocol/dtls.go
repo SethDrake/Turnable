@@ -8,6 +8,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/pion/dtls/v3"
 	"github.com/pion/dtls/v3/pkg/crypto/selfsign"
@@ -15,8 +16,8 @@ import (
 )
 
 const (
-	// dtlsMTU is the DTLS record payload limit
-	dtlsMTU = 1440
+	dtlsMTU              = 1440            // DTLS record payload limit
+	dtlsHandshakeTimeout = 5 * time.Second // DTLS handshake timeout
 )
 
 // DTLSHandler represents a DTLS session handler
@@ -243,12 +244,18 @@ func (D *DTLSHandler) connectPacketConn(ctx context.Context, underlay net.Packet
 	}
 
 	D.log.Debug("dtls client initialized", "underlay_local", underlay.LocalAddr().String(), "remote", remoteAddr.String())
+
+	_ = conn.SetDeadline(time.Now().Add(dtlsHandshakeTimeout))
+
 	if err := conn.HandshakeContext(ctx); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("dtls client handshake failed: %w", err)
 	}
 
+	_ = conn.SetDeadline(time.Time{})
+
 	D.log.Debug("dtls client handshake completed", "underlay_local", underlay.LocalAddr().String(), "remote", remoteAddr.String())
+
 	return &dtlsClientConn{
 		Conn:     conn,
 		underlay: underlay,

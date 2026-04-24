@@ -27,6 +27,7 @@ func main() {
 	root.AddCommand(newClientCommand())
 	root.AddCommand(newKeygenCommand())
 	root.AddCommand(newConfigCommand())
+	root.AddCommand(newDirectConfigCommand())
 
 	if err := root.Execute(); err != nil {
 		slog.Error(err.Error())

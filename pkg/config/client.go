@@ -17,30 +17,30 @@ import (
 
 // ClientConfig represents a client configuration URL
 type ClientConfig struct {
-	UserUUID string `json:"user_uuid"` // User's unique UIID
-	Username string `json:"username"`  // [-] Username to use in the call
+	UserUUID string `json:"user_uuid,omitempty"` // User's unique UIID
+	Username string `json:"username,omitempty"`  // [-] Username to use in the call
 
-	PlatformID string `json:"platform_id"` // [-] ID of the platform
-	CallID     string `json:"call_id"`     // [-] ID of the call on the platform
+	PlatformID string `json:"platform_id,omitempty"` // [-] ID of the platform
+	CallID     string `json:"call_id,omitempty"`     // [-] ID of the call on the platform
 
-	RouteID         string `json:"route_id"`         // Route's unique ID
-	Socket          string `json:"socket"`           // Socket protocol to use (UDP/TCP)
-	Gateway         string `json:"gateway"`          // [-] Gateway's IP and port (for Relay)
-	GatewayUsername string `json:"gateway_username"` // [-] Gateway's username in the call (for P2P)
+	RouteID         string `json:"route_id,omitempty"`         // Route's unique ID
+	Socket          string `json:"socket,omitempty"`           // Socket protocol to use (UDP/TCP)
+	Gateway         string `json:"gateway,omitempty"`          // [-] Gateway's IP and port (for Relay)
+	GatewayUsername string `json:"gateway_username,omitempty"` // [-] Gateway's username in the call (for P2P)
 
-	Type      string `json:"type"`      // Connection type
-	ForceTurn bool   `json:"forceturn"` // [-] Force TURN connection in P2P mode
-	Peers     int    `json:"peers"`     // [-] How many peer connections to open per session
+	Type      string `json:"type,omitempty"` // Connection type
+	ForceTurn bool   `json:"forceturn"`      // [-] Force TURN connection in P2P mode
+	Peers     int    `json:"peers"`          // [-] How many peer connections to open per session
 
-	Proto     string `json:"proto"`          // [-] Protocol to use
-	Cloak     string `json:"cloak"`          // [-] Cloak method to use
-	Transport string `json:"transport"`      // [-] Transport protocol to use
-	Conn      string `json:"conn,omitempty"` // [-] Connection type (optional)
+	Proto     string `json:"proto,omitempty"`     // [-] Protocol to use
+	Cloak     string `json:"cloak,omitempty"`     // [-] Cloak method to use
+	Transport string `json:"transport,omitempty"` // [-] Transport protocol to use
+	Conn      string `json:"conn,omitempty"`      // [-] Connection type (optional)
 
-	PubKey     string `json:"pub_key"`    // [-] Public key of the server
-	Encryption string `json:"encryption"` // Encryption mode
+	PubKey     string `json:"pub_key,omitempty"`    // [-] Public key of the server
+	Encryption string `json:"encryption,omitempty"` // Encryption mode
 
-	Name string `json:"name"` // [-] Display name of the config
+	Name string `json:"name,omitempty"` // [-] Display name of the config
 
 	Interactive bool `json:"-"` // [-] Allow interactive operations
 }
@@ -53,9 +53,6 @@ func (c *ClientConfig) Validate() error {
 	if common.IsNullOrWhiteSpace(c.CallID) {
 		return errors.New("call_id is required")
 	}
-	if common.IsNullOrWhiteSpace(c.RouteID) {
-		return errors.New("route_id (path) is required")
-	}
 
 	if c.Proto == "" {
 		c.Proto = "none"
@@ -67,9 +64,32 @@ func (c *ClientConfig) Validate() error {
 		c.Cloak = "none"
 	}
 
-	_, err := uuid.Parse(c.UserUUID)
-	if err != nil {
-		return fmt.Errorf("invalid user uuid: %s", c.UserUUID)
+	if c.Type != "direct" {
+		if common.IsNullOrWhiteSpace(c.RouteID) {
+			return errors.New("route_id (path) is required")
+		}
+
+		_, err := uuid.Parse(c.UserUUID)
+		if err != nil {
+			return fmt.Errorf("invalid user uuid: %s", c.UserUUID)
+		}
+
+		switch c.Encryption {
+		case "handshake", "full":
+			// OK
+		default:
+			return fmt.Errorf("invalid encryption mode: %s", c.Encryption)
+		}
+
+		pubBytes, err := base64.StdEncoding.DecodeString(c.PubKey)
+		if err != nil {
+			return err
+		}
+
+		_, err = mlkem.NewEncapsulationKey768(pubBytes)
+		if err != nil {
+			return fmt.Errorf("invalid PQC public key structure: %w", err)
+		}
 	}
 
 	if !common.PlatformsHolder.Exists(c.PlatformID) {
@@ -95,29 +115,12 @@ func (c *ClientConfig) Validate() error {
 		return fmt.Errorf("transport is required for tcp to work reliably")
 	}
 
-	if c.Transport != "" && !common.TransportsHolder.Exists(c.Transport) {
+	if !common.TransportsHolder.Exists(c.Transport) {
 		return fmt.Errorf("invalid transport: %s", c.Transport)
-	}
-
-	switch c.Encryption {
-	case "handshake", "full":
-		// OK
-	default:
-		return fmt.Errorf("invalid encryption mode: %s", c.Encryption)
 	}
 
 	if c.Peers <= 0 {
 		return fmt.Errorf("invalid peers count: %d (must be >= 1)", c.Peers)
-	}
-
-	pubBytes, err := base64.StdEncoding.DecodeString(c.PubKey)
-	if err != nil {
-		return err
-	}
-
-	_, err = mlkem.NewEncapsulationKey768(pubBytes)
-	if err != nil {
-		return fmt.Errorf("invalid PQC public key structure: %w", err)
 	}
 
 	if !common.IsNullOrWhiteSpace(c.Gateway) {

@@ -357,13 +357,8 @@ func (D *RelayHandler) connectClientSession() error {
 	}
 
 	cfg := D.clientConfig
-	reconnectCtx := D.reconnectCtx
-
 	if cfg == nil {
 		return errors.New("relay reconnect requires client config")
-	}
-	if reconnectCtx == nil {
-		return errors.New("relay reconnect context is not initialized")
 	}
 
 	platformHandler, err := platformpkg.GetHandler(cfg.PlatformID)
@@ -379,7 +374,7 @@ func (D *RelayHandler) connectClientSession() error {
 		os.Exit(0)
 	}
 
-	sessionCtx, sessionCancel := context.WithCancel(reconnectCtx)
+	sessionCtx, sessionCancel := context.WithCancel(D.reconnectCtx)
 	events := platformHandler.WatchEvents(sessionCtx)
 
 	if err := platformHandler.Connect(); err != nil {
@@ -409,7 +404,7 @@ func (D *RelayHandler) connectClientSession() error {
 		Password:  turnInfo.Password,
 	}
 
-	go watchPlatform(sessionCtx, events)
+	go relayWatchPlatform(sessionCtx, events)
 
 	numPeers := cfg.Peers
 	if numPeers < 1 {
@@ -488,8 +483,7 @@ func (D *RelayHandler) connectClientSession() error {
 		return
 	}
 
-	var spawnPeer func(idx int)
-	spawnPeer = func(idx int) {
+	spawnPeer := func(idx int) {
 		go func() {
 			delay := peerReconnectInit
 			for {
@@ -598,7 +592,6 @@ primaryLoop:
 
 			assignedUUID = uuidBytes
 			peerConn = NewPeerConn(sessionCtx)
-			peerConn.SetLogger(slog.With("session_uuid", uuid.UUID(uuidBytes).String()))
 			peerConn.SetOnAllPeersGone(func() { fullReconnect("all peers disconnected") })
 
 			if addErr := peerConn.AddPeer(pickConn(p), makePeerReconnectFn(p.idx)); addErr != nil {
@@ -939,8 +932,8 @@ func (D *RelayHandler) handleSecondaryPeer(
 	return nil
 }
 
-// watchPlatform watches platform signaling events
-func watchPlatform(ctx context.Context, events <-chan platformpkg.Event) {
+// relayWatchPlatform watches platform signaling events
+func relayWatchPlatform(ctx context.Context, events <-chan platformpkg.Event) {
 	for {
 		select {
 		case <-ctx.Done():

@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 
 	"github.com/theairblow/turnable/pkg/config"
-	"github.com/theairblow/turnable/pkg/engine/tunnels"
 	"github.com/theairblow/turnable/pkg/internal/connection"
+	"github.com/theairblow/turnable/pkg/tunnels"
 )
 
 // VPNClient represents a VPN client

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,11 +21,9 @@ import (
 )
 
 const (
-	// srtpPayloadType is the RTP payload type used to mimic VP8 WebRTC traffic
-	srtpPayloadType = 100
-
-	// srtpMTU is the SRTP record payload limit
-	srtpMTU = 1440
+	srtpPayloadType      = 100             // RTP payload type used to mimic VP8 WebRTC traffic
+	srtpMTU              = 1440            // SRTP record payload limit
+	srtpHandshakeTimeout = 5 * time.Second // DTLS handshake timeout
 )
 
 // SRTPHandler disguises VPN traffic as WebRTC SRTP
@@ -242,7 +241,7 @@ func (S *SRTPHandler) Connect(ctx context.Context, dest net.Addr, relay RelayInf
 	return conn, nil
 }
 
-// connectPacketConn performs DTLS-SRTP handshake and returns an SRTP-wrapped connection
+// connectPacketConn performs DTLS-SRTP handshake and returns an SRTP wrapped connection
 func (S *SRTPHandler) connectPacketConn(ctx context.Context, underlay net.PacketConn, remoteAddr net.Addr) (net.Conn, error) {
 	if underlay == nil {
 		return nil, errors.New("srtp connect requires packet underlay")
@@ -298,11 +297,17 @@ func (S *SRTPHandler) connectPacketConn(ctx context.Context, underlay net.Packet
 	}
 
 	S.log.Debug("srtp client handshake started", "remote", remoteAddr.String())
+
+	_ = dtlsConn.SetDeadline(time.Now().Add(dtlsHandshakeTimeout))
+
 	if err := dtlsConn.HandshakeContext(ctx); err != nil {
 		_ = dtlsConn.Close()
 		_ = dConn.Close()
 		return nil, fmt.Errorf("srtp client handshake failed: %w", err)
 	}
+
+	_ = dtlsConn.SetDeadline(time.Time{})
+
 	S.log.Debug("srtp client handshake completed", "remote", remoteAddr.String())
 
 	conn, err := newSRTPConn(underlay, remoteAddr, dtlsConn, srtpCh, true)
@@ -322,7 +327,7 @@ func isDTLSByte(b byte) bool { return b >= 20 && b <= 63 }
 // isRTPByte returns true if the first byte indicates an RTP/SRTP packet
 func isRTPByte(b byte) bool { return b >= 128 && b <= 191 }
 
-// srtpDemux classifies incoming UDP packets as DTLS or SRTP and routes them to per-session channels
+// srtpDemux classifies incoming UDP packets as DTLS or SRTP and routes them to per session channels
 type srtpDemux struct {
 	raw      *net.UDPConn
 	mu       sync.RWMutex
@@ -419,29 +424,93 @@ func (d *srtpDemux) run() {
 	}
 }
 
-// demuxedConn adapts a channel of packets into a net.PacketConn for dtls.Server/Client
+// deadlineState manages a read deadline capable channel
+type deadlineState struct {
+	mu   sync.Mutex
+	ch   chan struct{}
+	stop func()
+	exp  time.Time
+}
+
+// getCh returns the current deadline channel, creating one if needed
+func (d *deadlineState) getCh() <-chan struct{} {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.ch == nil {
+		d.ch = make(chan struct{})
+	}
+	return d.ch
+}
+
+// isExpired reports whether the deadline has actually passed
+func (d *deadlineState) isExpired() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return !d.exp.IsZero() && !time.Now().Before(d.exp)
+}
+
+// set updates the deadline, waking any blocked reads so they re-check
+func (d *deadlineState) set(t time.Time) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.stop != nil {
+		d.stop()
+		d.stop = nil
+	}
+
+	if d.ch != nil {
+		select {
+		case <-d.ch:
+		default:
+			close(d.ch)
+		}
+	}
+
+	d.ch = make(chan struct{})
+	d.exp = t
+	if !t.IsZero() {
+		dur := time.Until(t)
+		if dur <= 0 {
+			close(d.ch)
+			return
+		}
+		ch := d.ch
+		timer := time.AfterFunc(dur, func() { close(ch) })
+		d.stop = func() { timer.Stop() }
+	}
+}
+
+// demuxedConn adapts a channel of packets into a net.PacketConn
 type demuxedConn struct {
 	raw       net.PacketConn
 	ch        chan []byte
 	addr      net.Addr
 	closed    chan struct{}
 	closeOnce sync.Once
+	dl        deadlineState
 }
 
-// ReadFrom blocks until a packet arrives on the channel or the conn is closed
+// ReadFrom reads an incoming packet and blocks
 func (d *demuxedConn) ReadFrom(b []byte) (int, net.Addr, error) {
-	select {
-	case pkt, ok := <-d.ch:
-		if !ok {
+	for {
+		dl := d.dl.getCh()
+		select {
+		case pkt, ok := <-d.ch:
+			if !ok {
+				return 0, nil, net.ErrClosed
+			}
+			return copy(b, pkt), d.addr, nil
+		case <-d.closed:
 			return 0, nil, net.ErrClosed
+		case <-dl:
+			if d.dl.isExpired() {
+				return 0, nil, os.ErrDeadlineExceeded
+			}
 		}
-		return copy(b, pkt), d.addr, nil
-	case <-d.closed:
-		return 0, nil, net.ErrClosed
 	}
 }
 
-// WriteTo forwards the write directly to the underlying PacketConn
+// WriteTo writes a packet directly to the raw connection
 func (d *demuxedConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	return d.raw.WriteTo(b, addr)
 }
@@ -449,22 +518,28 @@ func (d *demuxedConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 // LocalAddr returns the local address of the underlying conn
 func (d *demuxedConn) LocalAddr() net.Addr { return d.raw.LocalAddr() }
 
-// SetDeadline is a stub that returns an error
-func (d *demuxedConn) SetDeadline(_ time.Time) error { return nil }
+// SetDeadline sets both the read and write deadlines
+func (d *demuxedConn) SetDeadline(t time.Time) error {
+	if err := d.raw.SetDeadline(t); err != nil {
+		return err
+	}
+	d.dl.set(t)
+	return nil
+}
 
-// SetReadDeadline is a stub that returns an error
-func (d *demuxedConn) SetReadDeadline(_ time.Time) error { return nil }
+// SetReadDeadline sets the deadline for future ReadFrom calls
+func (d *demuxedConn) SetReadDeadline(t time.Time) error { d.dl.set(t); return nil }
 
-// SetWriteDeadline is a stub that returns an error
-func (d *demuxedConn) SetWriteDeadline(_ time.Time) error { return nil }
+// SetWriteDeadline sets the write deadline on the underlying conn
+func (d *demuxedConn) SetWriteDeadline(t time.Time) error { return d.raw.SetWriteDeadline(t) }
 
-// Close signals the demuxedConn as closed; the underlying raw conn is not closed here
+// Close signals the demuxedConn as closed without closing the underlay
 func (d *demuxedConn) Close() error {
 	d.closeOnce.Do(func() { close(d.closed) })
 	return nil
 }
 
-// newSRTPConn extracts keying material from DTLS and builds an SRTP-wrapped net.Conn
+// newSRTPConn extracts keying material from DTLS and builds an SRTP wrapped connection
 func newSRTPConn(raw net.PacketConn, remote net.Addr, dtlsConn *dtls.Conn, incoming chan []byte, isClient bool) (*srtpConn, error) {
 	state, ok := dtlsConn.ConnectionState()
 	if !ok {
@@ -494,15 +569,14 @@ func newSRTPConn(raw net.PacketConn, remote net.Addr, dtlsConn *dtls.Conn, incom
 	}
 
 	return &srtpConn{
-		raw:        raw,
-		remote:     remote,
-		dtlsConn:   dtlsConn,
-		encCtx:     encCtx,
-		decCtx:     decCtx,
-		incoming:   incoming,
-		ssrc:       binary.BigEndian.Uint32(ssrcBuf[:]),
-		closed:     make(chan struct{}),
-		deadlineCh: make(chan struct{}),
+		raw:      raw,
+		remote:   remote,
+		dtlsConn: dtlsConn,
+		encCtx:   encCtx,
+		decCtx:   decCtx,
+		incoming: incoming,
+		ssrc:     binary.BigEndian.Uint32(ssrcBuf[:]),
+		closed:   make(chan struct{}),
 	}, nil
 }
 
@@ -524,18 +598,13 @@ type srtpConn struct {
 	onClose   func()
 	underlay  net.PacketConn
 
-	deadlineMu   sync.Mutex
-	deadlineCh   chan struct{}
-	deadlineStop func()
+	dl deadlineState
 }
 
 // Read decrypts an incoming SRTP packet and returns its payload
 func (c *srtpConn) Read(b []byte) (int, error) {
 	for {
-		c.deadlineMu.Lock()
-		dlCh := c.deadlineCh
-		c.deadlineMu.Unlock()
-
+		dl := c.dl.getCh()
 		select {
 		case pkt, ok := <-c.incoming:
 			if !ok {
@@ -553,8 +622,10 @@ func (c *srtpConn) Read(b []byte) (int, error) {
 			return copy(b, decrypted[hdrLen:]), nil
 		case <-c.closed:
 			return 0, net.ErrClosed
-		case <-dlCh:
-			return 0, errors.New("i/o timeout")
+		case <-dl:
+			if c.dl.isExpired() {
+				return 0, os.ErrDeadlineExceeded
+			}
 		}
 	}
 }
@@ -620,32 +691,10 @@ func (c *srtpConn) LocalAddr() net.Addr { return c.raw.LocalAddr() }
 func (c *srtpConn) RemoteAddr() net.Addr { return c.remote }
 
 // SetDeadline sets both the read and write deadline
-func (c *srtpConn) SetDeadline(t time.Time) error { return c.SetReadDeadline(t) }
+func (c *srtpConn) SetDeadline(t time.Time) error { c.dl.set(t); return nil }
 
 // SetReadDeadline sets the deadline for future Read calls
-func (c *srtpConn) SetReadDeadline(t time.Time) error {
-	c.deadlineMu.Lock()
-	defer c.deadlineMu.Unlock()
-
-	if c.deadlineStop != nil {
-		c.deadlineStop()
-		c.deadlineStop = nil
-	}
-
-	c.deadlineCh = make(chan struct{})
-	if !t.IsZero() {
-		d := time.Until(t)
-		if d <= 0 {
-			close(c.deadlineCh)
-			return nil
-		}
-		ch := c.deadlineCh
-		timer := time.AfterFunc(d, func() { close(ch) })
-		c.deadlineStop = func() { timer.Stop() }
-	}
-
-	return nil
-}
+func (c *srtpConn) SetReadDeadline(t time.Time) error { c.dl.set(t); return nil }
 
 // SetWriteDeadline is a stub which does nothing since UDP is non-blocking
 func (c *srtpConn) SetWriteDeadline(_ time.Time) error { return nil }

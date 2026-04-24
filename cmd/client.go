@@ -13,7 +13,7 @@ import (
 	"github.com/theairblow/turnable/pkg/common"
 	"github.com/theairblow/turnable/pkg/config"
 	"github.com/theairblow/turnable/pkg/engine"
-	"github.com/theairblow/turnable/pkg/engine/tunnels"
+	"github.com/theairblow/turnable/pkg/tunnels"
 )
 
 // clientOptions holds CLI flags for the client subcommand

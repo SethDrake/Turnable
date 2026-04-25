@@ -21,7 +21,7 @@ var (
 func init() {
 	level.Set(slog.LevelInfo)
 	defaultHandler := NewPrettyHandler(os.Stdout, &slog.HandlerOptions{Level: level})
-	SetHandler(defaultHandler)
+	SetLogHandler(defaultHandler)
 }
 
 // ANSI color string
@@ -183,8 +183,8 @@ func levelStyle(level slog.Level) (string, string) {
 	}
 }
 
-// SetHandler sets the current slog handler
-func SetHandler(h slog.Handler) {
+// SetLogHandler sets the current slog handler
+func SetLogHandler(h slog.Handler) {
 	mu.Lock()
 	defer mu.Unlock()
 	slog.SetDefault(slog.New(h))

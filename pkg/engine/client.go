@@ -12,8 +12,8 @@ import (
 	"github.com/theairblow/turnable/pkg/tunnels"
 )
 
-// VPNClient represents a VPN client
-type VPNClient struct {
+// TurnableClient represents a Turnable client
+type TurnableClient struct {
 	Config config.ClientConfig
 
 	running atomic.Bool
@@ -26,17 +26,17 @@ type VPNClient struct {
 }
 
 // SetLogger changes the slog logger instance
-func (c *VPNClient) SetLogger(log *slog.Logger) {
+func (c *TurnableClient) SetLogger(log *slog.Logger) {
 	if log == nil {
 		log = slog.Default()
 	}
 	c.log = log
 }
 
-// NewVPNClient creates a new VPN client from the specified ClientConfig
-func NewVPNClient(cfg config.ClientConfig) *VPNClient {
+// NewTurnableClient creates a new Turnable client from the specified ClientConfig
+func NewTurnableClient(cfg config.ClientConfig) *TurnableClient {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &VPNClient{
+	return &TurnableClient{
 		Config: cfg,
 		ctx:    ctx,
 		cancel: cancel,
@@ -44,8 +44,8 @@ func NewVPNClient(cfg config.ClientConfig) *VPNClient {
 	}
 }
 
-// Start starts the VPN client using the provided local tunnel handler
-func (c *VPNClient) Start(tunnelHandler tunnels.Handler) error {
+// Start starts the Turnable client using the provided local tunnel handler
+func (c *TurnableClient) Start(tunnelHandler tunnels.Handler) error {
 	if !c.running.CompareAndSwap(false, true) {
 		return errors.New("already running")
 	}
@@ -63,7 +63,7 @@ func (c *VPNClient) Start(tunnelHandler tunnels.Handler) error {
 
 	tunnelHandler.SetLogger(c.log)
 
-	c.log.Info("starting vpn client", "connection_type", c.Config.Type)
+	c.log.Info("starting turnable client", "connection_type", c.Config.Type)
 
 	connHandler, err := connection.GetHandler(c.Config.Type)
 	if err != nil {
@@ -87,18 +87,23 @@ func (c *VPNClient) Start(tunnelHandler tunnels.Handler) error {
 
 	go c.acceptClients(acceptCh)
 
-	c.log.Info("vpn client started", "connection_type", c.Config.Type)
+	c.log.Info("turnable client started", "connection_type", c.Config.Type)
 	success = true
 	return nil
 }
 
-// Stop stops the VPN client
-func (c *VPNClient) Stop() error {
+// IsRunning returns whether the Turnable client is currently running
+func (c *TurnableClient) IsRunning() bool {
+	return c.running.Load()
+}
+
+// Stop stops the Turnable client
+func (c *TurnableClient) Stop() error {
 	if !c.running.CompareAndSwap(true, false) {
 		return errors.New("not running")
 	}
 
-	c.log.Info("stopping vpn client")
+	c.log.Info("stopping turnable client")
 	c.cancel()
 
 	var err error
@@ -107,16 +112,16 @@ func (c *VPNClient) Stop() error {
 	}
 
 	if err != nil {
-		c.log.Warn("vpn client stopped with errors", "error", err)
+		c.log.Warn("turnable client stopped with errors", "error", err)
 	} else {
-		c.log.Info("vpn client stopped")
+		c.log.Info("turnable client stopped")
 	}
 
 	return err
 }
 
 // acceptClients accepts local clients and handles them
-func (c *VPNClient) acceptClients(acceptCh <-chan tunnels.AcceptedClient) {
+func (c *TurnableClient) acceptClients(acceptCh <-chan tunnels.AcceptedClient) {
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -131,7 +136,7 @@ func (c *VPNClient) acceptClients(acceptCh <-chan tunnels.AcceptedClient) {
 }
 
 // handleClient opens a tinymux channel and pipes the local client through it
-func (c *VPNClient) handleClient(local tunnels.AcceptedClient) {
+func (c *TurnableClient) handleClient(local tunnels.AcceptedClient) {
 	if c.handler == nil {
 		c.log.Warn("no active handler for local client")
 		_ = local.Stream.Close()

@@ -12,8 +12,8 @@ import (
 	"github.com/theairblow/turnable/pkg/tunnels"
 )
 
-// VPNServer represents a VPN server
-type VPNServer struct {
+// TurnableServer represents a Turnable server
+type TurnableServer struct {
 	Config config.ServerConfig
 
 	running  atomic.Bool
@@ -26,17 +26,17 @@ type VPNServer struct {
 }
 
 // SetLogger changes the slog logger instance
-func (s *VPNServer) SetLogger(log *slog.Logger) {
+func (s *TurnableServer) SetLogger(log *slog.Logger) {
 	if log == nil {
 		log = slog.Default()
 	}
 	s.log = log
 }
 
-// NewVPNServer creates a new VPN server from the provided ServerConfig
-func NewVPNServer(cfg config.ServerConfig) *VPNServer {
+// NewTurnableServer creates a new Turnable server from the provided ServerConfig
+func NewTurnableServer(cfg config.ServerConfig) *TurnableServer {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &VPNServer{
+	return &TurnableServer{
 		Config: cfg,
 		ctx:    ctx,
 		cancel: cancel,
@@ -45,7 +45,7 @@ func NewVPNServer(cfg config.ServerConfig) *VPNServer {
 }
 
 // Start starts all enabled connection handlers
-func (s *VPNServer) Start(tunnelHandler tunnels.Handler) error {
+func (s *TurnableServer) Start(tunnelHandler tunnels.Handler) error {
 	if !s.running.CompareAndSwap(false, true) {
 		return errors.New("already running")
 	}
@@ -68,7 +68,7 @@ func (s *VPNServer) Start(tunnelHandler tunnels.Handler) error {
 	}
 
 	if s.Config.Relay.Enabled {
-		s.log.Info("starting vpn server relay handler")
+		s.log.Info("starting turnable server relay handler")
 
 		connHandler, err := connection.GetHandler("relay")
 		if err != nil {
@@ -92,13 +92,18 @@ func (s *VPNServer) Start(tunnelHandler tunnels.Handler) error {
 	return nil
 }
 
-// Stop stops the VPN server and all active handlers
-func (s *VPNServer) Stop() error {
+// IsRunning returns whether the Turnable server is currently running
+func (s *TurnableServer) IsRunning() bool {
+	return s.running.Load()
+}
+
+// Stop stops the Turnable server and all active handlers
+func (s *TurnableServer) Stop() error {
 	if !s.running.CompareAndSwap(true, false) {
 		return errors.New("not running")
 	}
 
-	s.log.Info("stopping vpn server", "handlers", len(s.handlers))
+	s.log.Info("stopping turnable server", "handlers", len(s.handlers))
 	s.cancel()
 
 	var err error
@@ -107,16 +112,16 @@ func (s *VPNServer) Stop() error {
 	}
 
 	if err != nil {
-		s.log.Warn("vpn server stopped with errors", "error", err)
+		s.log.Warn("turnable server stopped with errors", "error", err)
 	} else {
-		s.log.Info("vpn server stopped")
+		s.log.Info("turnable server stopped")
 	}
 
 	return err
 }
 
 // acceptClients accepts authenticated clients and handles them
-func (s *VPNServer) acceptClients(handler connection.Handler, tunnelHandler tunnels.Handler) {
+func (s *TurnableServer) acceptClients(handler connection.Handler, tunnelHandler tunnels.Handler) {
 	clientCh, err := handler.AcceptClients(s.ctx)
 	if err != nil {
 		s.log.Warn("accept clients failed", "error", err)
@@ -135,7 +140,7 @@ func (s *VPNServer) acceptClients(handler connection.Handler, tunnelHandler tunn
 }
 
 // handleClient dials the backend route and pipes the tinymux channel through it
-func (s *VPNServer) handleClient(client connection.ServerClient, tunnelHandler tunnels.Handler) {
+func (s *TurnableServer) handleClient(client connection.ServerClient, tunnelHandler tunnels.Handler) {
 	routeCtx, routeCancel := context.WithCancel(s.ctx)
 	defer routeCancel()
 

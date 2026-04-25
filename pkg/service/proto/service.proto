@@ -1,0 +1,189 @@
+syntax = "proto3";
+
+package turnable.service.v1;
+
+option go_package = "github.com/theairblow/turnable/pkg/service/proto;servicepb";
+
+// ParamValue holds a typed tunnel handler parameter value
+message ParamValue {
+  oneof value {
+    string string_val = 1;
+    int64  int_val    = 2;
+    bool   bool_val   = 3;
+    double double_val = 4;
+  }
+}
+
+// TunnelHandlerConfig represents a tunnel handler and its config
+message TunnelHandlerConfig {
+  string id = 1;
+  map<string, ParamValue> args = 2;
+}
+
+// ProviderConfig represents a config provider and its config
+message ProviderConfig {
+  string id = 1;
+  map<string, ParamValue> args = 2;
+}
+
+// InstanceType identifies whether a managed instance is a server or client
+enum InstanceType {
+  INSTANCE_TYPE_UNSPECIFIED = 0;
+  INSTANCE_TYPE_SERVER = 1;
+  INSTANCE_TYPE_CLIENT = 2;
+}
+
+// InstanceInfo describes a managed instance
+message InstanceInfo {
+  string id = 1;
+  InstanceType type = 2;
+  bool running = 3;
+}
+
+// LogAttr is a single structured log attribute key/value pair
+message LogAttr {
+  string key = 1;
+  string value = 2;
+}
+
+// LogRecord represents a structured log entry emitted by the service or an instance
+message LogRecord {
+  int64 time = 1;
+  int32 level = 2;
+  string message = 3;
+  repeated LogAttr attrs = 4;
+}
+
+// ServerHello is the first message sent by the service on every new connection
+message ServerHello {
+  string magic = 1;
+  uint32 version = 2;
+  bool auth_required = 3;
+  bytes public_key = 4;
+}
+
+// ClientHello is sent by the client in response if auth is required
+message ClientHello {
+  bytes ciphertext = 1;
+  bytes public_key = 2;
+}
+
+// StartServerRequest starts a new Turnable server instance
+message StartServerRequest {
+  string config = 1;
+  ProviderConfig provider = 2;
+  TunnelHandlerConfig tunnel = 3;
+}
+
+// StartServerResponse carries the new server instance ID or an error
+message StartServerResponse {
+  string instance_id = 1;
+  string error = 2;
+}
+
+// StartClientRequest starts a new Turnable client instance
+message StartClientRequest {
+  string config = 1;
+  TunnelHandlerConfig tunnel = 2;
+}
+
+// StartClientResponse carries the new client instance ID or an error
+message StartClientResponse {
+  string instance_id = 1;
+  string error = 2;
+}
+
+// StopInstanceRequest stops the specified managed instance
+message StopInstanceRequest {
+  string instance_id = 1;
+}
+
+// StopInstanceResponse is sent in reply to StopInstanceRequest
+message StopInstanceResponse {
+  string error = 1;
+}
+
+// UpdateProviderRequest updates config provider data for a running server
+message UpdateProviderRequest {
+  string instance_id = 1;
+  ProviderConfig provider = 2;
+}
+
+// UpdateProviderResponse is sent in reply to UpdateProviderRequest
+message UpdateProviderResponse {}
+
+// ListInstancesRequest requests the list of all managed instances
+message ListInstancesRequest {}
+
+// ListInstancesResponse carries the list of all managed instances
+message ListInstancesResponse {
+  repeated InstanceInfo instances = 1;
+}
+
+// ValidateServerConfigRequest validates a server config
+message ValidateServerConfigRequest {
+  string config = 1;
+  ProviderConfig provider = 2;
+}
+
+// ValidateServerConfigResponse reports whether the server config is valid
+message ValidateServerConfigResponse {
+  bool valid = 1;
+  string error = 2;
+}
+
+// ValidateClientConfigRequest validates a client config JSON or URL
+message ValidateClientConfigRequest {
+  string config = 1;
+}
+
+// ValidateClientConfigResponse reports whether the client config is valid
+message ValidateClientConfigResponse {
+  bool valid = 1;
+  string error = 2;
+}
+
+// ConvertClientConfigRequest converts a client config between JSON and URL form
+message ConvertClientConfigRequest {
+  string config = 1;
+}
+
+// ConvertClientConfigResponse returns the converted client config
+message ConvertClientConfigResponse {
+  string config = 1;
+}
+
+// ErrorResponse returns a fatal protocol-level error
+message ErrorResponse {
+  string message = 1;
+}
+
+// Request is a client-to-service message
+message Request {
+  oneof payload {
+    StartServerRequest start_server = 1;
+    StartClientRequest start_client = 2;
+    StopInstanceRequest stop_instance = 3;
+    UpdateProviderRequest update_provider = 4;
+    ListInstancesRequest list_instances = 5;
+    ValidateServerConfigRequest validate_server_config = 6;
+    ValidateClientConfigRequest validate_client_config = 7;
+    ConvertClientConfigRequest convert_client_config = 8;
+  }
+}
+
+// Response is a service-to-client message
+message Response {
+  oneof payload {
+    StartServerResponse start_server = 1;
+    StartClientResponse start_client = 2;
+    StopInstanceResponse stop_instance = 3;
+    UpdateProviderResponse update_provider = 4;
+    ListInstancesResponse list_instances = 5;
+    LogRecord log_record = 6;
+    ErrorResponse error = 7;
+    ValidateServerConfigResponse validate_server_config = 8;
+    ValidateClientConfigResponse validate_client_config = 9;
+    ConvertClientConfigResponse convert_client_config = 10;
+  }
+}

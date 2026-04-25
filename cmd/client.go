@@ -85,7 +85,7 @@ func clientMain(opts *clientOptions) error {
 
 	tunnelHandler := &tunnels.SocketHandler{LocalAddr: opts.listenAddr}
 
-	client := engine.NewVPNClient(*cfg)
+	client := engine.NewTurnableClient(*cfg)
 	if err := client.Start(tunnelHandler); err != nil {
 		return fmt.Errorf("failed to start vpn client: %w", err)
 	}

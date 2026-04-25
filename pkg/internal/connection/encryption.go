@@ -87,8 +87,8 @@ func wrapServerEncryptedConn(conn net.Conn, serverPrivKey string) (*EncryptedCon
 
 // newEncryptedConn derives directional AEAD contexts from one shared key
 func newEncryptedConn(conn net.Conn, sharedKey []byte, isClient bool) (*EncryptedConn, error) {
-	clientWriteKey, clientWritePrefix := deriveTunnelMaterial(sharedKey, "client->server")
-	serverWriteKey, serverWritePrefix := deriveTunnelMaterial(sharedKey, "server->client")
+	clientWriteKey, clientWritePrefix := DeriveTunnelMaterial(sharedKey, "client->server")
+	serverWriteKey, serverWritePrefix := DeriveTunnelMaterial(sharedKey, "server->client")
 
 	var readKey, writeKey []byte
 	var readPrefix, writePrefix [4]byte
@@ -100,11 +100,11 @@ func newEncryptedConn(conn net.Conn, sharedKey []byte, isClient bool) (*Encrypte
 		readKey, readPrefix = clientWriteKey, clientWritePrefix
 	}
 
-	readAEAD, err := newTunnelAEAD(readKey)
+	readAEAD, err := NewTunnelAEAD(readKey)
 	if err != nil {
 		return nil, err
 	}
-	writeAEAD, err := newTunnelAEAD(writeKey)
+	writeAEAD, err := NewTunnelAEAD(writeKey)
 	if err != nil {
 		return nil, err
 	}
@@ -121,8 +121,8 @@ func newEncryptedConn(conn net.Conn, sharedKey []byte, isClient bool) (*Encrypte
 	}, nil
 }
 
-// deriveTunnelMaterial splits the shared key into per-direction key and nonce material
-func deriveTunnelMaterial(sharedKey []byte, label string) ([]byte, [4]byte) {
+// DeriveTunnelMaterial splits the shared key into per-direction key and nonce material
+func DeriveTunnelMaterial(sharedKey []byte, label string) ([]byte, [4]byte) {
 	keyHash := sha256.Sum256(append(append([]byte{}, sharedKey...), []byte(" key "+label)...))
 	prefixHash := sha256.Sum256(append(append([]byte{}, sharedKey...), []byte(" nonce "+label)...))
 	var prefix [4]byte
@@ -130,8 +130,8 @@ func deriveTunnelMaterial(sharedKey []byte, label string) ([]byte, [4]byte) {
 	return keyHash[:], prefix
 }
 
-// newTunnelAEAD creates a new AEAD tunnel used for encryption
-func newTunnelAEAD(key []byte) (cipher.AEAD, error) {
+// NewTunnelAEAD creates a new AES-256-GCM-12 AEAD used for tunnel encryption
+func NewTunnelAEAD(key []byte) (cipher.AEAD, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize aes cipher: %w", err)

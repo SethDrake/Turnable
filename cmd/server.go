@@ -73,7 +73,7 @@ func serverMain(opts *serverOptions) error {
 
 	tunnelHandler := &tunnels.SocketHandler{}
 
-	server := engine.NewVPNServer(*config)
+	server := engine.NewTurnableServer(*config)
 	if err := server.Start(tunnelHandler); err != nil {
 		return fmt.Errorf("failed to start VPN server: %w", err)
 	}

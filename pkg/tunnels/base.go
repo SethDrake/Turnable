@@ -3,6 +3,7 @@ package tunnels
 import (
 	"context"
 	"io"
+	"log/slog"
 	"net"
 
 	"github.com/theairblow/turnable/pkg/common"
@@ -11,19 +12,16 @@ import (
 
 // AcceptedClient is a local client connection accepted from a tunnel
 type AcceptedClient struct {
-	// Stream is the bidirectional connection to the local client
-	Stream io.ReadWriteCloser
-	// Close is called to release any resources associated with the client
-	Close func() error
+	Stream io.ReadWriteCloser // Bidirectional connection to the local client
+	Close  func() error       // Called to release any resources associated with the client
 }
 
 // Handler provides local client acceptance and remote route dialing
 type Handler interface {
-	ID() string
-	// Open starts accepting local clients for the given socket type and returns a stream channel
-	Open(ctx context.Context, socketType string) (<-chan AcceptedClient, error)
-	// Connect dials a remote endpoint described by the route and returns the connection
-	Connect(ctx context.Context, route *config.Route) (net.Conn, error)
+	ID() string                                                                 // Returns the unique ID of this handler
+	Open(ctx context.Context, socketType string) (<-chan AcceptedClient, error) // Starts accepting local clients
+	Connect(ctx context.Context, route *config.Route) (net.Conn, error)         // Connects to a remote route
+	SetLogger(log *slog.Logger)                                                 // Changes the slog logger instance
 }
 
 // Handlers represents tunnel handler registry.

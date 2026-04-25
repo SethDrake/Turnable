@@ -16,8 +16,6 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// TODO: forward a logger with additional information prepended (e.g. session_id and peer_idx)
-
 const (
 	muxControlMagic        = "TMUX"
 	muxControlVersion byte = 1
@@ -68,6 +66,8 @@ type tinyMuxCore struct {
 
 	rateLimiter *rate.Limiter
 	stageBuf    []byte
+
+	log *slog.Logger
 }
 
 // newTinyMuxCore creates a new tinymux core
@@ -80,6 +80,7 @@ func newTinyMuxCore(conn net.Conn) *tinyMuxCore {
 		notifyCh:    make(chan struct{}, 1),
 		rateLimiter: rate.NewLimiter(rate.Inf, 256*1024),
 		stageBuf:    make([]byte, muxMaxPacket+2),
+		log:         slog.Default(),
 	}
 
 	go m.readLoop()
@@ -112,7 +113,7 @@ func (m *tinyMuxCore) readLoop() {
 			select {
 			case fc.incoming <- payload:
 			default:
-				slog.Debug("mux flow receive buffer full, dropping packet", "flow_id", flowID)
+				m.log.Debug("mux flow receive buffer full, dropping packet", "flow_id", flowID)
 			}
 		}
 	}
@@ -445,6 +446,14 @@ func (c *TinyMuxClient) SetRateLimit(bytesPerSec float64) {
 	c.mux.setRateLimit(bytesPerSec)
 }
 
+// SetLogger changes the slog logger instance
+func (c *TinyMuxClient) SetLogger(log *slog.Logger) {
+	if log == nil {
+		log = slog.Default()
+	}
+	c.mux.log = log
+}
+
 // NewTinyMuxClient creates a client tinymux connection
 func NewTinyMuxClient(ctx context.Context, conn net.Conn) (*TinyMuxClient, error) {
 	mux := newTinyMuxCore(conn)
@@ -493,7 +502,7 @@ func (c *TinyMuxClient) pingLoop() {
 				if c.firstUnanswered.Load() == 0 {
 					c.firstUnanswered.Store(time.Now().UnixNano())
 				} else if time.Since(time.Unix(0, c.firstUnanswered.Load())) > muxPingTimeout {
-					slog.Debug("tinymux client pong timeout")
+					c.mux.log.Debug("tinymux client pong timeout")
 					c.pingCancel()
 					_ = c.mux.Close()
 					return
@@ -521,7 +530,7 @@ func (c *TinyMuxClient) controlReader() {
 			select {
 			case <-c.pingCtx.Done():
 			default:
-				slog.Debug("tinymux client cut off unexpectedly", "error", err)
+				c.mux.log.Debug("tinymux client cut off unexpectedly", "error", err)
 				c.pingCancel()
 				_ = c.mux.Close()
 			}
@@ -540,7 +549,7 @@ func (c *TinyMuxClient) controlReader() {
 				_ = raw.(*managedFlowConn).flowConn.Close()
 			}
 		case muxControlTypeDisconnect:
-			slog.Debug("tinymux client received disconnect, triggering full reconnect")
+			c.mux.log.Debug("tinymux client received disconnect, triggering full reconnect")
 			c.pingCancel()
 			_ = c.mux.Close()
 			return
@@ -561,7 +570,7 @@ func (c *TinyMuxClient) OpenChannel() (net.Conn, error) {
 		fc := c.mux.createFlow(flowID)
 		mf := &managedFlowConn{flowConn: fc, writeControl: c.writeControl, flowStates: &c.flowStates}
 		c.flowStates.Store(flowID, mf)
-		slog.Debug("tinymux channel opened", "side", "client", "flow_id", flowID)
+		c.mux.log.Debug("tinymux channel opened", "side", "client", "flow_id", flowID)
 		return mf, nil
 	case <-c.pingCtx.Done():
 		return nil, errors.New("tinymux client session closed")
@@ -658,7 +667,7 @@ func (s *TinyMuxServer) AcceptChannels(ctx context.Context) <-chan MuxChannel {
 				select {
 				case <-ctx.Done():
 				default:
-					slog.Debug("tinymux server control stopped", "error", err)
+					s.mux.log.Debug("tinymux server control stopped", "error", err)
 				}
 
 				s.doneOnce.Do(func() { close(s.done) })
@@ -684,7 +693,7 @@ func (s *TinyMuxServer) AcceptChannels(ctx context.Context) <-chan MuxChannel {
 				})
 				s.controlMu.Unlock()
 
-				slog.Debug("tinymux channel opened", "side", "server", "flow_id", fc.id)
+				s.mux.log.Debug("tinymux channel opened", "side", "server", "flow_id", fc.id)
 				select {
 				case out <- MuxChannel{
 					FlowID: fc.id,
@@ -699,7 +708,7 @@ func (s *TinyMuxServer) AcceptChannels(ctx context.Context) <-chan MuxChannel {
 					_ = raw.(*managedFlowConn).flowConn.Close()
 				}
 			case muxControlTypeDisconnect:
-				slog.Debug("tinymux server received disconnect")
+				s.mux.log.Debug("tinymux server received disconnect")
 				s.doneOnce.Do(func() { close(s.done) })
 				_ = s.Close()
 				return
@@ -722,7 +731,7 @@ func (s *TinyMuxServer) pingTimeoutLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if time.Since(time.Unix(0, s.lastPing.Load())) > muxPingTimeout {
-				slog.Debug("tinymux server ping timeout")
+				s.mux.log.Debug("tinymux server ping timeout")
 				_ = s.Close()
 				return
 			}
@@ -733,6 +742,14 @@ func (s *TinyMuxServer) pingTimeoutLoop(ctx context.Context) {
 // SetRateLimit configures the aggregate outbound rate limit in bytes/sec; 0 = unlimited.
 func (s *TinyMuxServer) SetRateLimit(bytesPerSec float64) {
 	s.mux.setRateLimit(bytesPerSec)
+}
+
+// SetLogger changes the slog logger instance
+func (s *TinyMuxServer) SetLogger(log *slog.Logger) {
+	if log == nil {
+		log = slog.Default()
+	}
+	s.mux.log = log
 }
 
 // writeControl serializes and writes a control message under the control mutex

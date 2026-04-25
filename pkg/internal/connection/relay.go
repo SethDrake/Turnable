@@ -64,6 +64,16 @@ type RelayHandler struct {
 	reconnectMu     sync.Mutex
 	reconnectCtx    context.Context
 	reconnectCancel context.CancelFunc
+
+	log *slog.Logger
+}
+
+// SetLogger changes the slog logger instance
+func (D *RelayHandler) SetLogger(log *slog.Logger) {
+	if log == nil {
+		log = slog.Default()
+	}
+	D.log = log
 }
 
 // relayServerSession tracks a multi-peer server-side session
@@ -84,6 +94,9 @@ func (D *RelayHandler) ID() string {
 func (D *RelayHandler) Start(cfg config.ServerConfig) error {
 	if !D.running.CompareAndSwap(false, true) {
 		return errors.New("already running")
+	}
+	if D.log == nil {
+		D.log = slog.Default()
 	}
 
 	success := false
@@ -152,6 +165,9 @@ func (D *RelayHandler) Connect(cfg config.ClientConfig) error {
 	if !D.running.CompareAndSwap(false, true) {
 		return errors.New("already running")
 	}
+	if D.log == nil {
+		D.log = slog.Default()
+	}
 
 	success := false
 	defer func() {
@@ -168,7 +184,7 @@ func (D *RelayHandler) Connect(cfg config.ClientConfig) error {
 	}
 
 	if cfg.Proto == "none" {
-		slog.Warn("using no protocol is dangerous, please reconsider!")
+		D.log.Warn("using no protocol is dangerous, please reconsider!")
 	}
 
 	reconnectCtx, reconnectCancel := context.WithCancel(context.Background())
@@ -370,7 +386,7 @@ func (D *RelayHandler) connectClientSession() error {
 	}
 
 	if os.Getenv("QUIT_AFTER_AUTH") == "1" {
-		slog.Info("QUIT_AFTER_AUTH set, quitting...")
+		D.log.Info("QUIT_AFTER_AUTH set, quitting...")
 		os.Exit(0)
 	}
 
@@ -404,7 +420,7 @@ func (D *RelayHandler) connectClientSession() error {
 		Password:  turnInfo.Password,
 	}
 
-	go relayWatchPlatform(sessionCtx, events)
+	go relayWatchPlatform(sessionCtx, events, D.log)
 
 	numPeers := cfg.Peers
 	if numPeers < 1 {
@@ -420,7 +436,7 @@ func (D *RelayHandler) connectClientSession() error {
 			defer D.reconnecting.Store(false)
 			delay := fullReconnectInit
 
-			slog.Info("starting full reconnect", "reason", reason, "delay", delay)
+			D.log.Info("starting full reconnect", "reason", reason, "delay", delay)
 			select {
 			case <-sessionCtx.Done():
 				return
@@ -431,7 +447,7 @@ func (D *RelayHandler) connectClientSession() error {
 				if err := D.connectClientSession(); err == nil {
 					return
 				} else {
-					slog.Warn("full reconnect failed, retrying", "delay", delay, "error", err)
+					D.log.Warn("full reconnect failed, retrying", "delay", delay, "error", err)
 				}
 
 				ctx := D.reconnectCtx
@@ -459,7 +475,7 @@ func (D *RelayHandler) connectClientSession() error {
 
 	connectAndEncrypt := func(idx int, ctx context.Context) (raw, enc net.Conn, err error) {
 		h, _ := protocol.GetHandler(cfg.Proto)
-		h.SetLogger(slog.With("peer_idx", idx))
+		h.SetLogger(D.log.With("peer_idx", idx))
 
 		connCtx, connCancel := context.WithTimeout(ctx, 5*time.Second)
 		defer connCancel()
@@ -493,11 +509,11 @@ func (D *RelayHandler) connectClientSession() error {
 						return
 					}
 					if errors.Is(err, protocol.ErrQuotaReached) {
-						slog.Warn("peer quota reached, backing off", "peer_idx", idx, "delay", peerQuotaBackoff)
+						D.log.Warn("peer quota reached, backing off", "peer_idx", idx, "delay", peerQuotaBackoff)
 						delay = peerQuotaBackoff
 					}
 
-					slog.Warn("peer connect failed", "peer_idx", idx, "error", err, "delay", delay)
+					D.log.Warn("peer connect failed", "peer_idx", idx, "error", err, "delay", delay)
 					select {
 					case <-sessionCtx.Done():
 						return
@@ -570,7 +586,7 @@ primaryLoop:
 			cfgJson, err := cfg.ToJSON(true)
 			if err != nil {
 				_ = p.raw.Close()
-				slog.Warn("primary handshake failed, retrying", "peer_idx", p.idx, "error", err)
+				D.log.Warn("primary handshake failed, retrying", "peer_idx", p.idx, "error", err)
 				spawnPeer(p.idx)
 				continue
 			}
@@ -585,7 +601,7 @@ primaryLoop:
 					_ = platformHandler.Disconnect()
 					return hErr
 				}
-				slog.Warn("primary handshake failed, retrying", "peer_idx", p.idx, "error", hErr)
+				D.log.Warn("primary handshake failed, retrying", "peer_idx", p.idx, "error", hErr)
 				spawnPeer(p.idx)
 				continue
 			}
@@ -627,15 +643,28 @@ primaryLoop:
 	}()
 
 	sessionUUIDStr := uuid.UUID(assignedUUID).String()
+	sessionLog := D.log.With("session_uuid", sessionUUIDStr)
+	muxClient.SetLogger(sessionLog)
+	peerConn.SetLogger(sessionLog)
 	D.cancel = sessionCancel
 	D.platform = platformHandler
 	D.muxClient = muxClient
 	D.peerConn = peerConn
 	D.sessionUUID = sessionUUIDStr
 
-	slog.Info("relay client session connected", "session_uuid", sessionUUIDStr, "peers", numPeers)
+	D.log.Info("relay client session connected", "session_uuid", sessionUUIDStr, "peers", numPeers)
 
 	go func() {
+		defer func() {
+			for {
+				select {
+				case p := <-connCh:
+					_ = p.raw.Close()
+				default:
+					return
+				}
+			}
+		}()
 		for i := 0; i < numPeers-1; i++ {
 			select {
 			case <-sessionCtx.Done():
@@ -652,13 +681,13 @@ primaryLoop:
 							fullReconnect(sErr.Error())
 							return
 						}
-						slog.Warn("secondary handshake failed, retrying", "peer_idx", p.idx, "error", sErr)
+						D.log.Warn("secondary handshake failed, retrying", "peer_idx", p.idx, "error", sErr)
 						spawnPeer(p.idx)
 						return
 					}
 
 					if addErr := peerConn.AddPeer(pickConn(p), makePeerReconnectFn(p.idx)); addErr != nil {
-						slog.Warn("peer add failed", "peer_idx", p.idx, "error", addErr)
+						D.log.Warn("peer add failed", "peer_idx", p.idx, "error", addErr)
 						_ = p.raw.Close()
 					}
 				}(p)
@@ -688,14 +717,14 @@ func (D *RelayHandler) AcceptClients(ctx context.Context) (<-chan ServerClient, 
 
 		clientCh, err := protoHandler.AcceptClients(ctx)
 		if err != nil {
-			slog.Warn("accept clients failed", "error", err)
+			D.log.Warn("accept clients failed", "error", err)
 			return
 		}
 
 		for client := range clientCh {
 			go func() {
 				if err := D.handleIncomingPeer(ctx, client, serverCfg, out); err != nil {
-					slog.Warn("relay peer handling failed", "addr", client.Address, "error", err)
+					D.log.Warn("relay peer handling failed", "addr", client.Address, "error", err)
 				}
 			}()
 		}
@@ -792,10 +821,11 @@ func (D *RelayHandler) handlePrimaryPeer(
 	_ = encConn.SetDeadline(time.Time{})
 
 	sessionUUIDStr := sessionUUID.String()
-	slog.Info("relay handshake started", "addr", client.Address)
+	sessionLog := D.log.With("session_uuid", sessionUUIDStr)
+	D.log.Info("relay handshake started", "addr", client.Address)
 
 	peerConn := NewPeerConn(ctx)
-	peerConn.SetLogger(slog.With("session_uuid", sessionUUIDStr))
+	peerConn.SetLogger(sessionLog)
 	newSess := &relayServerSession{
 		peerConn: peerConn,
 		userUUID: clientCfg.UserUUID,
@@ -835,6 +865,7 @@ func (D *RelayHandler) handlePrimaryPeer(
 
 	defer func() { _ = muxServer.Close() }()
 	newSess.muxServer.Store(muxServer)
+	muxServer.SetLogger(sessionLog)
 
 	if route.BandwidthRelay > 0 {
 		muxServer.SetRateLimit(route.BandwidthRelay * float64(clientCfg.Peers))
@@ -847,12 +878,12 @@ func (D *RelayHandler) handlePrimaryPeer(
 		return fmt.Errorf("transport setup: %w", transportErr)
 	}
 
-	slog.Info("relay handshake completed", "addr", client.Address, "session_uuid", sessionUUIDStr, "user_uuid", clientCfg.UserUUID, "route_id", clientCfg.RouteID)
+	D.log.Info("relay handshake completed", "addr", client.Address, "session_uuid", sessionUUIDStr, "user_uuid", clientCfg.UserUUID, "route_id", clientCfg.RouteID)
 
 	for channel := range muxServer.AcceptChannels(ctx) {
 		conn, wrapErr := transportHandler.WrapServer(channel.Conn)
 		if wrapErr != nil {
-			slog.Warn("transport wrap failed", "flow_id", channel.FlowID, "error", wrapErr)
+			D.log.Warn("transport wrap failed", "flow_id", channel.FlowID, "error", wrapErr)
 			_ = channel.Conn.Close()
 			continue
 		}
@@ -933,18 +964,18 @@ func (D *RelayHandler) handleSecondaryPeer(
 }
 
 // relayWatchPlatform watches platform signaling events
-func relayWatchPlatform(ctx context.Context, events <-chan platformpkg.Event) {
+func relayWatchPlatform(ctx context.Context, events <-chan platformpkg.Event, log *slog.Logger) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case event, ok := <-events:
 			if !ok {
-				slog.Debug("relay signaling monitor stopped: event stream closed")
+				log.Debug("relay signaling monitor stopped: event stream closed")
 				return
 			}
 			if event.Type == platformpkg.EventCallEnded {
-				slog.Debug("relay signaling reported call ended", "metadata", event.Metadata)
+				log.Debug("relay signaling reported call ended", "metadata", event.Metadata)
 			}
 		}
 	}

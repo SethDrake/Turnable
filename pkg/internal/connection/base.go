@@ -3,6 +3,7 @@ package connection
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 
 	"github.com/theairblow/turnable/pkg/common"
@@ -22,6 +23,7 @@ type Handler interface {
 	OpenChannel() (net.Conn, error)                                 // Opens a new logical data channel
 	Disconnect() error                                              // Gracefully disconnects from the current remote server
 	Close() error                                                   // Forcibly closes the current remove server connection
+	SetLogger(log *slog.Logger)                                     // Changes the slog logger instance
 }
 
 // ServerClient represents a server client

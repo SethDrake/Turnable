@@ -21,9 +21,8 @@ import (
 )
 
 const (
-	srtpPayloadType      = 100             // RTP payload type used to mimic VP8 WebRTC traffic
-	srtpMTU              = 1440            // SRTP record payload limit
-	srtpHandshakeTimeout = 5 * time.Second // DTLS handshake timeout
+	srtpPayloadType = 100  // RTP payload type used to mimic VP8 WebRTC traffic
+	srtpMTU         = 1440 // SRTP record payload limit
 )
 
 // SRTPHandler disguises VPN traffic as WebRTC SRTP

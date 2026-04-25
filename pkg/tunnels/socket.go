@@ -22,6 +22,15 @@ const udpIdleTimeout = 60 * time.Second
 // SocketHandler accepts local clients and dials remote routes for TCP and UDP sockets
 type SocketHandler struct {
 	LocalAddr string
+	log       *slog.Logger
+}
+
+// SetLogger changes the slog logger instance
+func (S *SocketHandler) SetLogger(log *slog.Logger) {
+	if log == nil {
+		log = slog.Default()
+	}
+	S.log = log
 }
 
 // ID returns the tunnel handler identifier.
@@ -55,6 +64,9 @@ func (S *SocketHandler) Connect(ctx context.Context, route *config.Route) (net.C
 
 // acceptTCP starts a TCP listener and yields each accepted connection as a stream
 func (S *SocketHandler) acceptTCP(ctx context.Context) (<-chan AcceptedClient, error) {
+	if S.log == nil {
+		S.log = slog.Default()
+	}
 	addr := S.LocalAddr
 	if addr == "" {
 		addr = "127.0.0.1:0"
@@ -63,7 +75,7 @@ func (S *SocketHandler) acceptTCP(ctx context.Context) (<-chan AcceptedClient, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on tcp %s: %w", addr, err)
 	}
-	slog.Info("local tcp listener started", "addr", listener.Addr())
+	S.log.Info("local tcp listener started", "addr", listener.Addr())
 
 	accepted := make(chan AcceptedClient)
 	go func() { <-ctx.Done(); _ = listener.Close() }()
@@ -78,7 +90,7 @@ func (S *SocketHandler) acceptTCP(ctx context.Context) (<-chan AcceptedClient, e
 					strings.Contains(s, "use of closed network connection") || strings.Contains(s, "already closed") {
 					return
 				}
-				slog.Warn("tcp accept failed", "error", err)
+				S.log.Warn("tcp accept failed", "error", err)
 				continue
 			}
 			select {
@@ -94,6 +106,9 @@ func (S *SocketHandler) acceptTCP(ctx context.Context) (<-chan AcceptedClient, e
 
 // acceptUDP starts a UDP listener and yields each unique remote peer as a virtual stream
 func (S *SocketHandler) acceptUDP(ctx context.Context) (<-chan AcceptedClient, error) {
+	if S.log == nil {
+		S.log = slog.Default()
+	}
 	addr := S.LocalAddr
 	if addr == "" {
 		addr = "127.0.0.1:0"
@@ -106,7 +121,7 @@ func (S *SocketHandler) acceptUDP(ctx context.Context) (<-chan AcceptedClient, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on udp %s: %w", addr, err)
 	}
-	slog.Info("local udp listener started", "addr", conn.LocalAddr())
+	S.log.Info("local udp listener started", "addr", conn.LocalAddr())
 
 	var mu sync.Mutex
 	peers := make(map[string]*udpPeerStream)
@@ -124,7 +139,7 @@ func (S *SocketHandler) acceptUDP(ctx context.Context) (<-chan AcceptedClient, e
 					strings.Contains(s, "use of closed network connection") || strings.Contains(s, "already closed") {
 					return
 				}
-				slog.Warn("udp read failed", "error", err)
+				S.log.Warn("udp read failed", "error", err)
 				continue
 			}
 

@@ -38,6 +38,9 @@ func (D *DTLSHandler) Start(config config.ServerConfig) error {
 	if !D.running.CompareAndSwap(false, true) {
 		return errors.New("already running")
 	}
+	if D.log == nil {
+		D.log = slog.Default()
+	}
 
 	success := false
 	defer func() {
@@ -77,7 +80,7 @@ func (D *DTLSHandler) Start(config config.ServerConfig) error {
 
 	D.listener = listener
 
-	slog.Info("dtls listener started", "listen_addr", addr.String())
+	D.log.Info("dtls listener started", "listen_addr", addr.String())
 	success = true
 	return nil
 }
@@ -86,6 +89,9 @@ func (D *DTLSHandler) Start(config config.ServerConfig) error {
 func (D *DTLSHandler) Stop() error {
 	if !D.running.CompareAndSwap(true, false) {
 		return errors.New("not running")
+	}
+	if D.log == nil {
+		D.log = slog.Default()
 	}
 
 	listener := D.listener
@@ -96,10 +102,10 @@ func (D *DTLSHandler) Stop() error {
 	}
 	err := listener.Close()
 	if err != nil {
-		slog.Warn("dtls listener stop failed", "error", err)
+		D.log.Warn("dtls listener stop failed", "error", err)
 		return err
 	}
-	slog.Info("dtls listener stopped")
+	D.log.Info("dtls listener stopped")
 	return nil
 }
 
@@ -107,6 +113,9 @@ func (D *DTLSHandler) Stop() error {
 func (D *DTLSHandler) AcceptClients(ctx context.Context) (<-chan ServerClient, error) {
 	if !D.running.Load() {
 		return nil, errors.New("not running")
+	}
+	if D.log == nil {
+		D.log = slog.Default()
 	}
 
 	out := make(chan ServerClient)
@@ -126,20 +135,20 @@ func (D *DTLSHandler) AcceptClients(ctx context.Context) (<-chan ServerClient, e
 				case <-ctx.Done():
 					return
 				default:
-					slog.Warn("dtls accept failed", "error", err)
+					D.log.Warn("dtls accept failed", "error", err)
 					continue
 				}
 			}
 
 			go func(conn net.Conn) {
 				if dtlsConn, ok := conn.(*dtls.Conn); ok {
-					slog.Debug("dtls server handshake started", "addr", conn.RemoteAddr())
+					D.log.Debug("dtls server handshake started", "addr", conn.RemoteAddr())
 					if err := dtlsConn.HandshakeContext(ctx); err != nil {
-						slog.Warn("dtls handshake failed", "addr", conn.RemoteAddr(), "error", err)
+						D.log.Warn("dtls handshake failed", "addr", conn.RemoteAddr(), "error", err)
 						_ = conn.Close()
 						return
 					}
-					slog.Debug("dtls server handshake completed", "addr", conn.RemoteAddr())
+					D.log.Debug("dtls server handshake completed", "addr", conn.RemoteAddr())
 				}
 
 				select {

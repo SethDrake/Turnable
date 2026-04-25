@@ -21,6 +21,16 @@ type VPNClient struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	log *slog.Logger
+}
+
+// SetLogger changes the slog logger instance
+func (c *VPNClient) SetLogger(log *slog.Logger) {
+	if log == nil {
+		log = slog.Default()
+	}
+	c.log = log
 }
 
 // NewVPNClient creates a new VPN client from the specified ClientConfig
@@ -30,6 +40,7 @@ func NewVPNClient(cfg config.ClientConfig) *VPNClient {
 		Config: cfg,
 		ctx:    ctx,
 		cancel: cancel,
+		log:    slog.Default(),
 	}
 }
 
@@ -51,13 +62,16 @@ func (c *VPNClient) Start(tunnelHandler tunnels.Handler) error {
 		return fmt.Errorf("tunnel handler is required")
 	}
 
-	slog.Info("starting vpn client", "connection_type", c.Config.Type)
+	c.log.Info("starting vpn client", "connection_type", c.Config.Type)
 
 	connHandler, err := connection.GetHandler(c.Config.Type)
 	if err != nil {
 		c.running.Store(false)
 		return fmt.Errorf("get connection handler: %w", err)
 	}
+
+	tunnelHandler.SetLogger(c.log)
+	connHandler.SetLogger(c.log)
 
 	if err := connHandler.Connect(c.Config); err != nil {
 		_ = connHandler.Close()
@@ -76,7 +90,7 @@ func (c *VPNClient) Start(tunnelHandler tunnels.Handler) error {
 
 	go c.acceptClients(acceptCh)
 
-	slog.Info("vpn client started", "connection_type", c.Config.Type)
+	c.log.Info("vpn client started", "connection_type", c.Config.Type)
 	success = true
 	return nil
 }
@@ -87,7 +101,7 @@ func (c *VPNClient) Stop() error {
 		return errors.New("not running")
 	}
 
-	slog.Info("stopping vpn client")
+	c.log.Info("stopping vpn client")
 	c.cancel()
 
 	var err error
@@ -96,9 +110,9 @@ func (c *VPNClient) Stop() error {
 	}
 
 	if err != nil {
-		slog.Warn("vpn client stopped with errors", "error", err)
+		c.log.Warn("vpn client stopped with errors", "error", err)
 	} else {
-		slog.Info("vpn client stopped")
+		c.log.Info("vpn client stopped")
 	}
 
 	return err
@@ -122,7 +136,7 @@ func (c *VPNClient) acceptClients(acceptCh <-chan tunnels.AcceptedClient) {
 // handleClient opens a tinymux channel and pipes the local client through it
 func (c *VPNClient) handleClient(local tunnels.AcceptedClient) {
 	if c.handler == nil {
-		slog.Warn("no active handler for local client")
+		c.log.Warn("no active handler for local client")
 		_ = local.Stream.Close()
 		return
 	}
@@ -130,12 +144,12 @@ func (c *VPNClient) handleClient(local tunnels.AcceptedClient) {
 	channel, err := c.handler.OpenChannel()
 	if err != nil {
 		if !errors.Is(err, connection.ErrReconnecting) {
-			slog.Warn("failed to open channel for local client", "error", err)
+			c.log.Warn("failed to open channel for local client", "error", err)
 		}
 		_ = local.Stream.Close()
 		return
 	}
 
-	slog.Debug("piping local client to channel")
+	c.log.Debug("piping local client to channel")
 	pipeStreams(local.Stream, channel)
 }

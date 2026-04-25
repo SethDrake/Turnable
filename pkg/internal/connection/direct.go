@@ -32,6 +32,16 @@ type DirectHandler struct {
 	reconnectMu     sync.Mutex
 	reconnectCtx    context.Context
 	reconnectCancel context.CancelFunc
+
+	log *slog.Logger
+}
+
+// SetLogger changes the slog logger instance
+func (D *DirectHandler) SetLogger(log *slog.Logger) {
+	if log == nil {
+		log = slog.Default()
+	}
+	D.log = log
 }
 
 // ID returns the unique ID of this handler
@@ -57,6 +67,9 @@ func (D *DirectHandler) Connect(cfg config.ClientConfig) error {
 	if !D.running.CompareAndSwap(false, true) {
 		return errors.New("already running")
 	}
+	if D.log == nil {
+		D.log = slog.Default()
+	}
 
 	success := false
 	defer func() {
@@ -78,7 +91,7 @@ func (D *DirectHandler) Connect(cfg config.ClientConfig) error {
 		return errors.New("direct handler requires a gateway address")
 	}
 
-	slog.Warn("using a direct connection is dangerous, please reconsider!")
+	D.log.Warn("using a direct connection is dangerous, please reconsider!")
 
 	reconnectCtx, reconnectCancel := context.WithCancel(context.Background())
 	D.clientConfig = &cfg
@@ -122,7 +135,7 @@ func (D *DirectHandler) connectSession() error {
 	}
 
 	if os.Getenv("QUIT_AFTER_AUTH") == "1" {
-		slog.Info("QUIT_AFTER_AUTH set, quitting...")
+		D.log.Info("QUIT_AFTER_AUTH set, quitting...")
 		os.Exit(0)
 	}
 
@@ -156,7 +169,7 @@ func (D *DirectHandler) connectSession() error {
 		Password:  turnInfo.Password,
 	}
 
-	go directWatchPlatform(sessionCtx, events)
+	go directWatchPlatform(sessionCtx, events, D.log)
 
 	numPeers := cfg.Peers
 	if numPeers < 1 {
@@ -170,7 +183,7 @@ func (D *DirectHandler) connectSession() error {
 		go func() {
 			defer D.reconnecting.Store(false)
 			delay := fullReconnectInit
-			slog.Info("direct: starting full reconnect", "reason", reason, "delay", delay)
+			D.log.Info("direct: starting full reconnect", "reason", reason, "delay", delay)
 			select {
 			case <-sessionCtx.Done():
 				return
@@ -180,7 +193,7 @@ func (D *DirectHandler) connectSession() error {
 				if err := D.connectSession(); err == nil {
 					return
 				} else {
-					slog.Warn("direct: full reconnect failed", "delay", delay, "error", err)
+					D.log.Warn("direct: full reconnect failed", "delay", delay, "error", err)
 				}
 				rCtx := D.reconnectCtx
 				if rCtx == nil {
@@ -198,7 +211,7 @@ func (D *DirectHandler) connectSession() error {
 
 	dial := func(idx int, dialCtx context.Context) (net.Conn, error) {
 		h, _ := protocol.GetHandler("none")
-		h.SetLogger(slog.With("peer_idx", idx))
+		h.SetLogger(D.log.With("peer_idx", idx))
 		connCtx, connCancel := context.WithTimeout(dialCtx, 5*time.Second)
 		defer connCancel()
 		return h.Connect(connCtx, dest, relayInfo, true)
@@ -217,11 +230,11 @@ func (D *DirectHandler) connectSession() error {
 						return
 					}
 					if errors.Is(err, protocol.ErrQuotaReached) {
-						slog.Warn("peer quota reached, backing off", "peer_idx", idx, "delay", peerQuotaBackoff)
+						D.log.Warn("peer quota reached, backing off", "peer_idx", idx, "delay", peerQuotaBackoff)
 						delay = peerQuotaBackoff
 					}
 
-					slog.Warn("peer connect failed", "peer_idx", idx, "error", err, "delay", delay)
+					D.log.Warn("peer connect failed", "peer_idx", idx, "error", err, "delay", delay)
 					select {
 					case <-sessionCtx.Done():
 						return
@@ -242,7 +255,7 @@ func (D *DirectHandler) connectSession() error {
 
 	D.cancel = sessionCancel
 	D.peerConn = peerConn
-	slog.Info("direct session connected", "gateway", cfg.Gateway, "peers", numPeers)
+	D.log.Info("direct session connected", "gateway", cfg.Gateway, "peers", numPeers)
 	return nil
 }
 
@@ -292,18 +305,18 @@ func (D *DirectHandler) Close() error {
 }
 
 // directWatchPlatform watches platform signaling events
-func directWatchPlatform(ctx context.Context, events <-chan platformpkg.Event) {
+func directWatchPlatform(ctx context.Context, events <-chan platformpkg.Event, log *slog.Logger) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case event, ok := <-events:
 			if !ok {
-				slog.Debug("direct signaling monitor stopped: event stream closed")
+				log.Debug("direct signaling monitor stopped: event stream closed")
 				return
 			}
 			if event.Type == platformpkg.EventCallEnded {
-				slog.Debug("direct signaling reported call ended", "metadata", event.Metadata)
+				log.Debug("direct signaling reported call ended", "metadata", event.Metadata)
 			}
 		}
 	}

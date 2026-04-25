@@ -20,6 +20,16 @@ type VPNServer struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	log *slog.Logger
+}
+
+// SetLogger changes the slog logger instance
+func (s *VPNServer) SetLogger(log *slog.Logger) {
+	if log == nil {
+		log = slog.Default()
+	}
+	s.log = log
 }
 
 // NewVPNServer creates a new VPN server from the provided ServerConfig
@@ -29,6 +39,7 @@ func NewVPNServer(cfg config.ServerConfig) *VPNServer {
 		Config: cfg,
 		ctx:    ctx,
 		cancel: cancel,
+		log:    slog.Default(),
 	}
 }
 
@@ -51,17 +62,22 @@ func (s *VPNServer) Start() error {
 	}
 
 	if s.Config.Relay.Enabled {
-		slog.Info("starting vpn server relay handler")
+		s.log.Info("starting vpn server relay handler")
+
 		connHandler, err := connection.GetHandler("relay")
 		if err != nil {
-			slog.Error("failed to get relay handler", "error", err)
+			s.log.Error("failed to get relay handler", "error", err)
 			return err
 		}
+
+		connHandler.SetLogger(s.log)
+
 		if err := connHandler.Start(s.Config); err != nil {
-			slog.Error("failed to start relay handler", "error", err)
+			s.log.Error("failed to start relay handler", "error", err)
 			s.running.Store(false)
 			return err
 		}
+
 		s.handlers = append(s.handlers, connHandler)
 
 		go s.acceptClients(connHandler)
@@ -77,7 +93,7 @@ func (s *VPNServer) Stop() error {
 		return errors.New("not running")
 	}
 
-	slog.Info("stopping vpn server", "handlers", len(s.handlers))
+	s.log.Info("stopping vpn server", "handlers", len(s.handlers))
 	s.cancel()
 
 	var err error
@@ -86,9 +102,9 @@ func (s *VPNServer) Stop() error {
 	}
 
 	if err != nil {
-		slog.Warn("vpn server stopped with errors", "error", err)
+		s.log.Warn("vpn server stopped with errors", "error", err)
 	} else {
-		slog.Info("vpn server stopped")
+		s.log.Info("vpn server stopped")
 	}
 
 	return err
@@ -98,13 +114,13 @@ func (s *VPNServer) Stop() error {
 func (s *VPNServer) acceptClients(handler connection.Handler) {
 	clientCh, err := handler.AcceptClients(s.ctx)
 	if err != nil {
-		slog.Warn("accept clients failed", "error", err)
+		s.log.Warn("accept clients failed", "error", err)
 		return
 	}
 
 	for client := range clientCh {
 		if client.Route == nil || client.Config == nil || client.User == nil {
-			slog.Warn("dropping client with incomplete metadata", "addr", client.Address)
+			s.log.Warn("dropping client with incomplete metadata", "addr", client.Address)
 			_ = client.Conn.Close()
 			continue
 		}
@@ -115,23 +131,19 @@ func (s *VPNServer) acceptClients(handler connection.Handler) {
 
 // handleClient dials the backend route and pipes the tinymux channel through it
 func (s *VPNServer) handleClient(client connection.ServerClient) {
-	tunnelHandler, err := tunnels.GetHandler("socket")
-	if err != nil {
-		slog.Warn("failed to get tunnel handler", "error", err)
-		_ = client.Conn.Close()
-		return
-	}
+	tunnelHandler := tunnels.SocketHandler{}
+	tunnelHandler.SetLogger(s.log)
 
 	routeCtx, routeCancel := context.WithCancel(s.ctx)
 	defer routeCancel()
 
 	routeIO, err := tunnelHandler.Connect(routeCtx, client.Route)
 	if err != nil {
-		slog.Warn("failed to connect to route", "addr", client.Address, "route", client.Route.ID, "error", err)
+		s.log.Warn("failed to connect to route", "addr", client.Address, "route", client.Route.ID, "error", err)
 		_ = client.Conn.Close()
 		return
 	}
 
-	slog.Debug("piping client to route", "addr", client.Address, "route", client.Route.ID, "session", client.SessionUUID)
+	s.log.Debug("piping client to route", "addr", client.Address, "route", client.Route.ID, "session", client.SessionUUID)
 	pipeStreams(client.Conn, routeIO)
 }

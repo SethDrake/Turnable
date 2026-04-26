@@ -64,8 +64,6 @@ type VKHandler struct {
 
 	subscribers    map[int]chan Event
 	nextSubscriber int
-
-	interactive bool
 }
 
 // vkParticipant stores one call participant tracked from VK signaling

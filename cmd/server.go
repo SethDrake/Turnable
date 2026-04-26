@@ -9,16 +9,13 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/theairblow/turnable/pkg/common"
-	config2 "github.com/theairblow/turnable/pkg/config"
-	"github.com/theairblow/turnable/pkg/config/providers"
+	"github.com/theairblow/turnable/pkg/config"
 	"github.com/theairblow/turnable/pkg/engine"
-	"github.com/theairblow/turnable/pkg/tunnels"
 )
 
 // serverOptions holds CLI flags for the server subcommand
 type serverOptions struct {
 	configPath string
-	storePath  string
 	verbose    bool
 }
 
@@ -35,7 +32,6 @@ func newServerCommand() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&opts.configPath, "config", "c", "config.json", "server config JSON file path")
-	cmd.Flags().StringVarP(&opts.storePath, "store", "s", "store.json", "server user/route store JSON file path")
 	cmd.Flags().BoolVarP(&opts.verbose, "verbose", "V", false, "enable verbose debug logging")
 	return cmd
 }
@@ -46,35 +42,25 @@ func serverMain(opts *serverOptions) error {
 		common.SetLogLevel(int(slog.LevelDebug))
 	}
 
-	storeData, err := os.ReadFile(opts.storePath)
-	if err != nil {
-		return fmt.Errorf("failed to read store json file: %w", err)
-	}
-
-	provider, err := providers.NewJSONProviderFromJSON(string(storeData))
-	if err != nil {
-		return fmt.Errorf("failed to parse store json file: %w", err)
-	}
+	config.Options.Interactive = false
 
 	configData, err := os.ReadFile(opts.configPath)
 	if err != nil {
-		return fmt.Errorf("failed to read config json file: %w", err)
+		return fmt.Errorf("failed to read cfg json file: %w", err)
 	}
 
-	config, err := config2.NewServerConfigFromJSON(string(configData), provider)
+	cfg, err := config.NewServerConfigFromJSON(string(configData))
 	if err != nil {
-		return fmt.Errorf("failed to parse config json file: %w", err)
+		return fmt.Errorf("failed to parse cfg json file: %w", err)
 	}
 
-	err = config.Validate()
+	err = cfg.Validate()
 	if err != nil {
-		return fmt.Errorf("failed to validate server config: %w", err)
+		return fmt.Errorf("failed to validate server cfg: %w", err)
 	}
 
-	tunnelHandler := &tunnels.SocketHandler{}
-
-	server := engine.NewTurnableServer(*config)
-	if err := server.Start(tunnelHandler); err != nil {
+	server := engine.NewTurnableServer(*cfg)
+	if err := server.Start(); err != nil {
 		return fmt.Errorf("failed to start VPN server: %w", err)
 	}
 

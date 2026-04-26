@@ -13,7 +13,6 @@ import (
 	"github.com/theairblow/turnable/pkg/common"
 	"github.com/theairblow/turnable/pkg/config"
 	"github.com/theairblow/turnable/pkg/engine"
-	"github.com/theairblow/turnable/pkg/tunnels"
 )
 
 // clientOptions holds CLI flags for the client subcommand
@@ -55,8 +54,9 @@ func clientMain(opts *clientOptions) error {
 		common.SetLogLevel(int(slog.LevelDebug))
 	}
 
-	var cfg *config.ClientConfig
+	config.Options.Interactive = !opts.noInteractive
 
+	var cfg *config.ClientConfig
 	if !common.IsNullOrWhiteSpace(opts.configURL) {
 		var err error
 		cfg, err = config.NewClientConfigFromURL(opts.configURL)
@@ -81,12 +81,8 @@ func clientMain(opts *clientOptions) error {
 		return fmt.Errorf("failed to validate connection URL: %w", err)
 	}
 
-	cfg.Interactive = !opts.noInteractive
-
-	tunnelHandler := &tunnels.SocketHandler{LocalAddr: opts.listenAddr}
-
 	client := engine.NewTurnableClient(*cfg)
-	if err := client.Start(tunnelHandler); err != nil {
+	if err := client.Start(opts.listenAddr); err != nil {
 		return fmt.Errorf("failed to start vpn client: %w", err)
 	}
 

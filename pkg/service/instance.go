@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/theairblow/turnable/pkg/config"
-	"github.com/theairblow/turnable/pkg/config/providers"
 	"github.com/theairblow/turnable/pkg/engine"
 	pb "github.com/theairblow/turnable/pkg/service/proto"
 	"github.com/theairblow/turnable/pkg/tunnels"
@@ -45,12 +44,12 @@ func (i *Instance) Info() *pb.InstanceInfo {
 // buildTunnelHandler constructs a tunnel handler from a protobuf config
 func buildTunnelHandler(cfg *pb.TunnelHandlerConfig) (tunnels.Handler, error) {
 	if cfg == nil {
-		return &tunnels.SocketHandler{}, nil
+		return &engine.SocketHandler{}, nil
 	}
 
 	switch cfg.Id {
 	case "socket", "":
-		h := &tunnels.SocketHandler{}
+		h := &engine.SocketHandler{}
 		if v := cfg.Args["local_addr"]; v != nil {
 			if sv, ok := v.Value.(*pb.ParamValue_StringVal); ok {
 				h.LocalAddr = sv.StringVal
@@ -77,7 +76,7 @@ func buildProviderConfig(cfg *pb.ProviderConfig) (config.Provider, error) {
 			}
 		}
 
-		p, err := providers.NewJSONProviderFromJSON(data)
+		p, err := config.NewJSONProviderFromJSON(data)
 		if err != nil {
 			return nil, fmt.Errorf("create json provider: %w", err)
 		}

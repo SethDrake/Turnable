@@ -41,8 +41,6 @@ type ClientConfig struct {
 	Encryption string `json:"encryption,omitempty"` // Encryption mode
 
 	Name string `json:"name,omitempty"` // [-] Display name of the config
-
-	Interactive bool `json:"-"` // [-] Allow interactive operations
 }
 
 // Validate checks that the ClientConfig contains all required fields.

@@ -1,20 +1,20 @@
 package service
 
 import (
-	"bytes"
 	"crypto/cipher"
 	"crypto/mlkem"
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
 	"net"
+	"sync"
+	"time"
 
 	"github.com/theairblow/turnable/pkg/internal/connection"
-	pb "github.com/theairblow/turnable/pkg/service/proto"
 )
 
 const (
-	serviceVersion = uint32(1) // Service protocol version
+	serviceVersion = uint32(1) // Server protocol version
 )
 
 // KeyPair holds a parsed ML-KEM768 keypair for service encryption
@@ -82,50 +82,6 @@ func newServiceEncLayer(sharedKey []byte, isClient bool) *serviceEncLayer {
 	}
 }
 
-// serverHandshake sends a ServerHello and negotiates encryption if necessary
-func serverHandshake(nc net.Conn, kp *KeyPair, allowedKeys [][]byte) (*serviceEncLayer, error) {
-	hello := &pb.ServerHello{
-		Magic:        "TSVC",
-		Version:      serviceVersion,
-		AuthRequired: kp != nil,
-	}
-	if kp != nil {
-		hello.PublicKey = kp.pubKeyBytes
-	}
-
-	if err := writeFramed(nc, hello); err != nil {
-		return nil, fmt.Errorf("write server hello: %w", err)
-	}
-	if kp == nil {
-		return nil, nil
-	}
-
-	var clientHello pb.ClientHello
-	if err := readFramed(nc, &clientHello); err != nil {
-		return nil, fmt.Errorf("read client hello: %w", err)
-	}
-
-	if len(allowedKeys) > 0 {
-		allowed := false
-		for _, k := range allowedKeys {
-			if bytes.Equal(k, clientHello.PublicKey) {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			return nil, fmt.Errorf("client public key not in allowlist")
-		}
-	}
-
-	sharedKey, err := kp.privKey.Decapsulate(clientHello.Ciphertext)
-	if err != nil {
-		return nil, fmt.Errorf("decapsulate: %w", err)
-	}
-
-	return newServiceEncLayer(sharedKey, false), nil
-}
-
 // encrypt encrypts a plain byte slice
 func (e *serviceEncLayer) encrypt(plain []byte) []byte {
 	var nonce [12]byte
@@ -152,4 +108,110 @@ func (e *serviceEncLayer) decrypt(data []byte) ([]byte, error) {
 	}
 
 	return plain, nil
+}
+
+// encryptedConn wraps a net.Conn with transparent encryption/decryption
+type encryptedConn struct {
+	nc      net.Conn
+	enc     *serviceEncLayer
+	mu      sync.Mutex
+	readBuf []byte
+	readPos int
+	readEnd int
+}
+
+// newEncryptedConn wraps a conn with encryption layer
+func newEncryptedConn(nc net.Conn, enc *serviceEncLayer) *encryptedConn {
+	return &encryptedConn{
+		nc:      nc,
+		enc:     enc,
+		readBuf: make([]byte, 0, 1024),
+	}
+}
+
+// Read decrypts data transparently
+func (ec *encryptedConn) Read(p []byte) (int, error) {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+
+	if ec.readPos >= ec.readEnd {
+		var lenBuf [4]byte
+		if _, err := ec.nc.Read(lenBuf[:]); err != nil {
+			return 0, err
+		}
+
+		size := binary.BigEndian.Uint32(lenBuf[:])
+		if size > 8*1024*1024 {
+			return 0, fmt.Errorf("encrypted chunk too large: %d bytes", size)
+		}
+
+		encData := make([]byte, size)
+		if _, err := ec.nc.Read(encData); err != nil {
+			return 0, err
+		}
+
+		plain, err := ec.enc.decrypt(encData)
+		if err != nil {
+			return 0, err
+		}
+
+		ec.readBuf = plain
+		ec.readPos = 0
+		ec.readEnd = len(plain)
+	}
+
+	n := copy(p, ec.readBuf[ec.readPos:ec.readEnd])
+	ec.readPos += n
+	return n, nil
+}
+
+// Write encrypts data transparently
+func (ec *encryptedConn) Write(p []byte) (int, error) {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+
+	encrypted := ec.enc.encrypt(p)
+
+	var lenBuf [4]byte
+	binary.BigEndian.PutUint32(lenBuf[:], uint32(len(encrypted)))
+
+	if _, err := ec.nc.Write(lenBuf[:]); err != nil {
+		return 0, err
+	}
+
+	if _, err := ec.nc.Write(encrypted); err != nil {
+		return 0, err
+	}
+
+	return len(p), nil
+}
+
+// Close closes the underlying connection
+func (ec *encryptedConn) Close() error {
+	return ec.nc.Close()
+}
+
+// LocalAddr returns the underlying local address
+func (ec *encryptedConn) LocalAddr() net.Addr {
+	return ec.nc.LocalAddr()
+}
+
+// RemoteAddr returns the underlying remote address
+func (ec *encryptedConn) RemoteAddr() net.Addr {
+	return ec.nc.RemoteAddr()
+}
+
+// SetDeadline sets deadline on underlying connection
+func (ec *encryptedConn) SetDeadline(t time.Time) error {
+	return ec.nc.SetDeadline(t)
+}
+
+// SetReadDeadline sets read deadline on underlying connection
+func (ec *encryptedConn) SetReadDeadline(t time.Time) error {
+	return ec.nc.SetReadDeadline(t)
+}
+
+// SetWriteDeadline sets write deadline on underlying connection
+func (ec *encryptedConn) SetWriteDeadline(t time.Time) error {
+	return ec.nc.SetWriteDeadline(t)
 }

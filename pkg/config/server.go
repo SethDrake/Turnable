@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 
 	"github.com/theairblow/turnable/pkg/common"
@@ -22,7 +23,9 @@ type ServerConfig struct {
 	Relay RelayServerConfig `json:"relay"` // Relay server config
 	P2P   P2PServerConfig   `json:"p2p"`   // P2P server config
 
-	provider Provider // User and Route provider
+	Provider json.RawMessage `json:"provider"` // Provider configuration
+
+	provider Provider // Provider instance in use
 }
 
 // User represents a VPN user
@@ -76,22 +79,46 @@ type ClientPrefs struct {
 	Name string `json:"name"` // Display name of the config
 }
 
-// Provider represents a Route and User provider
-type Provider interface {
-	GetRoute(id string) (*Route, error)
-	GetUser(uuid string) (*User, error)
-	GetAllRoutes() []Route
+// ProviderConfig represents provider configuration options
+type ProviderConfig struct {
+	Type string `json:"type"` // Provider type
 }
 
-// NewServerConfigFromJSON creates a new ServerConfig from a base config JSON and Provider
-func NewServerConfigFromJSON(baseJSON string, p Provider) (*ServerConfig, error) {
+// NewServerConfigFromJSON creates a new ServerConfig from a base config JSON
+func NewServerConfigFromJSON(baseJSON string) (*ServerConfig, error) {
 	var s ServerConfig
 	if err := json.Unmarshal([]byte(baseJSON), &s); err != nil {
 		return nil, fmt.Errorf("failed to parse base server config: %w", err)
 	}
 
-	s.provider = p
 	return &s, nil
+}
+
+// RefreshProvider refreshes current provider
+func (s *ServerConfig) RefreshProvider() error {
+	if s.provider != nil {
+		err := s.provider.Close()
+		if err != nil {
+			slog.Warn("failed to close provider connection: %v", err)
+		}
+	}
+
+	var cfg ProviderConfig
+	if err := json.Unmarshal(s.Provider, &cfg); err != nil {
+		return fmt.Errorf("failed to parse provider config: %w", err)
+	}
+
+	provider, err := GetProvider(cfg.Type)
+	if err != nil {
+		return fmt.Errorf("provider does not exist: %s", cfg.Type)
+	}
+
+	if err := provider.Update(s.Provider); err != nil {
+		return fmt.Errorf("failed to update provider config: %w", err)
+	}
+
+	s.provider = provider
+	return nil
 }
 
 // Validate validates the ServerConfig
@@ -112,6 +139,15 @@ func (s *ServerConfig) Validate() error {
 
 	if s.Relay.Proto == "" {
 		s.Relay.Proto = "none"
+	}
+
+	var cfg ProviderConfig
+	if err := json.Unmarshal(s.Provider, &cfg); err != nil {
+		return fmt.Errorf("failed to parse provider config: %w", err)
+	}
+
+	if !ProviderExists(cfg.Type) {
+		return fmt.Errorf("provider does not exist: %s", cfg.Type)
 	}
 
 	if !common.IsNullOrWhiteSpace(s.Relay.PublicIP) {
@@ -258,16 +294,18 @@ func (s *ServerConfig) GetClientConfig(user *User, route *Route) (*ClientConfig,
 // GetRoute fetches a Route based on it's ID
 func (s *ServerConfig) GetRoute(id string) (*Route, error) {
 	if s.provider == nil {
-		return nil, fmt.Errorf("no config provider initialized")
+		return nil, fmt.Errorf("no config provider initialized, call RefreshProvider first")
 	}
+
 	return s.provider.GetRoute(id)
 }
 
 // GetUser fetches a User based on it's UUID
 func (s *ServerConfig) GetUser(uuid string) (*User, error) {
 	if s.provider == nil {
-		return nil, fmt.Errorf("no config provider initialized")
+		return nil, fmt.Errorf("no config provider initialized, call RefreshProvider first")
 	}
+
 	return s.provider.GetUser(uuid)
 }
 
@@ -276,6 +314,7 @@ func (s *ServerConfig) GetAllRoutes() []Route {
 	if s.provider == nil {
 		return nil
 	}
+
 	return s.provider.GetAllRoutes()
 }
 
@@ -285,5 +324,17 @@ func (s *ServerConfig) ToJSON() (string, error) {
 	if err != nil {
 		return "", err
 	}
+
+	if s.provider != nil {
+		cfg, err := s.provider.ToJSON()
+		if err != nil {
+			return "", err
+		}
+		
+		if cfg != nil {
+			s.Provider = cfg
+		}
+	}
+
 	return string(b), nil
 }

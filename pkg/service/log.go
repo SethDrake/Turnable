@@ -11,28 +11,28 @@ import (
 	pb "github.com/theairblow/turnable/pkg/service/proto"
 )
 
-// broadcast fans out log records to all connected service clients
-type broadcast struct {
+// logBroadcast fans out log records to all connected service clients
+type logBroadcast struct {
 	mu   sync.RWMutex
-	subs map[*conn]struct{}
+	subs map[*clientConn]struct{}
 }
 
 // subscribe registers a connection to receive all log records
-func (b *broadcast) subscribe(c *conn) {
+func (b *logBroadcast) subscribe(c *clientConn) {
 	b.mu.Lock()
 	b.subs[c] = struct{}{}
 	b.mu.Unlock()
 }
 
 // unsubscribe removes a connection from log delivery
-func (b *broadcast) unsubscribe(c *conn) {
+func (b *logBroadcast) unsubscribe(c *clientConn) {
 	b.mu.Lock()
 	delete(b.subs, c)
 	b.mu.Unlock()
 }
 
 // dispatch sends a log record to all subscribed connections without blocking
-func (b *broadcast) dispatch(rec *pb.LogRecord) {
+func (b *logBroadcast) dispatch(rec *pb.LogRecord) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	for c := range b.subs {
@@ -43,7 +43,7 @@ func (b *broadcast) dispatch(rec *pb.LogRecord) {
 // LogRelayHandler is a slog handler that forwards records to all service clients and an inner handler
 type LogRelayHandler struct {
 	inner     slog.Handler
-	broadcast *broadcast
+	broadcast *logBroadcast
 	attrs     []slog.Attr
 	groups    []string
 }
@@ -52,7 +52,7 @@ type LogRelayHandler struct {
 func newLogRelayHandler(inner slog.Handler) *LogRelayHandler {
 	return &LogRelayHandler{
 		inner:     inner,
-		broadcast: &broadcast{subs: make(map[*conn]struct{})},
+		broadcast: &logBroadcast{subs: make(map[*clientConn]struct{})},
 	}
 }
 

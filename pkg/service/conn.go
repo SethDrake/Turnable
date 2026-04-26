@@ -1,6 +1,7 @@
 package service
 
 import (
+	"crypto/mlkem"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -9,140 +10,6 @@ import (
 	pb "github.com/theairblow/turnable/pkg/service/proto"
 	"google.golang.org/protobuf/proto"
 )
-
-// conn handles a single service client connection
-type conn struct {
-	svc     *Service
-	nc      net.Conn
-	enc     *serviceEncLayer
-	writeCh chan *pb.Response
-}
-
-// newConn allocates a conn for an incoming connection
-func newConn(svc *Service, nc net.Conn) *conn {
-	return &conn{
-		svc:     svc,
-		nc:      nc,
-		writeCh: make(chan *pb.Response, 64),
-	}
-}
-
-// serve performs the handshake, subscribes to logs, then runs the IO loops
-func (c *conn) serve() {
-	defer c.svc.relay.broadcast.unsubscribe(c)
-	defer c.nc.Close()
-
-	enc, err := serverHandshake(c.nc, c.svc.keyPair, c.svc.allowedKeys)
-	if err != nil {
-		c.svc.log.Warn("service handshake failed", "remote", c.nc.RemoteAddr(), "error", err)
-		return
-	}
-	c.enc = enc
-	c.svc.relay.broadcast.subscribe(c)
-
-	go c.writeLoop()
-	c.readLoop()
-}
-
-// readLoop reads and dispatches requests until the connection closes
-func (c *conn) readLoop() {
-	defer close(c.writeCh)
-	for {
-		var req pb.Request
-		if err := c.readMsg(&req); err != nil {
-			return
-		}
-
-		resp, err := c.dispatch(&req)
-		if err != nil {
-			c.sendErr(err)
-			return
-		}
-
-		if resp != nil {
-			c.writeCh <- resp
-		}
-	}
-}
-
-// writeLoop drains channel and sends responses to the client
-func (c *conn) writeLoop() {
-	defer c.nc.Close()
-	for resp := range c.writeCh {
-		if err := c.writeMsg(resp); err != nil {
-			return
-		}
-	}
-}
-
-// sendLog enqueues a log record without blocking
-func (c *conn) sendLog(rec *pb.LogRecord) {
-	select {
-	case c.writeCh <- &pb.Response{Payload: &pb.Response_LogRecord{LogRecord: rec}}:
-	default:
-	}
-}
-
-// sendErr sends a fatal ErrorResponse
-func (c *conn) sendErr(err error) {
-	_ = c.writeMsg(&pb.Response{Payload: &pb.Response_Error{Error: &pb.ErrorResponse{Message: err.Error()}}})
-}
-
-// dispatch handles an incoming request and sends a response
-func (c *conn) dispatch(req *pb.Request) (*pb.Response, error) {
-	switch p := req.Payload.(type) {
-	case *pb.Request_StartServer:
-		id, err := c.svc.startServer(p.StartServer)
-		resp := &pb.StartServerResponse{InstanceId: id}
-		if err != nil {
-			resp.Error = err.Error()
-		}
-
-		return &pb.Response{Payload: &pb.Response_StartServer{StartServer: resp}}, nil
-	case *pb.Request_StartClient:
-		id, err := c.svc.startClient(p.StartClient)
-		resp := &pb.StartClientResponse{InstanceId: id}
-		if err != nil {
-			resp.Error = err.Error()
-		}
-
-		return &pb.Response{Payload: &pb.Response_StartClient{StartClient: resp}}, nil
-	case *pb.Request_StopInstance:
-		resp := &pb.StopInstanceResponse{}
-		if err := c.svc.stopInstance(p.StopInstance.InstanceId); err != nil {
-			resp.Error = err.Error()
-		}
-
-		return &pb.Response{Payload: &pb.Response_StopInstance{StopInstance: resp}}, nil
-	case *pb.Request_UpdateProvider:
-		if err := c.svc.updateProvider(p.UpdateProvider.InstanceId, p.UpdateProvider.Provider); err != nil {
-			return nil, err
-		}
-
-		return &pb.Response{Payload: &pb.Response_UpdateProvider{UpdateProvider: &pb.UpdateProviderResponse{}}}, nil
-	case *pb.Request_ListInstances:
-		return &pb.Response{Payload: &pb.Response_ListInstances{ListInstances: &pb.ListInstancesResponse{
-			Instances: c.svc.listInstances(),
-		}}}, nil
-	case *pb.Request_ValidateServerConfig:
-		return &pb.Response{Payload: &pb.Response_ValidateServerConfig{
-			ValidateServerConfig: handleValidateServerConfig(p.ValidateServerConfig),
-		}}, nil
-	case *pb.Request_ValidateClientConfig:
-		return &pb.Response{Payload: &pb.Response_ValidateClientConfig{
-			ValidateClientConfig: handleValidateClientConfig(p.ValidateClientConfig),
-		}}, nil
-	case *pb.Request_ConvertClientConfig:
-		resp, err := handleConvertClientConfig(p.ConvertClientConfig)
-		if err != nil {
-			return nil, err
-		}
-
-		return &pb.Response{Payload: &pb.Response_ConvertClientConfig{ConvertClientConfig: resp}}, nil
-	default:
-		return nil, fmt.Errorf("unknown request type")
-	}
-}
 
 // writeFramed writes a length-prefixed proto message without encryption
 func writeFramed(nc net.Conn, msg proto.Message) error {
@@ -181,51 +48,100 @@ func readFramed(nc net.Conn, msg proto.Message) error {
 	return proto.Unmarshal(data, msg)
 }
 
-// writeMsg writes a length-prefixed, optionally encrypted proto message
-func (c *conn) writeMsg(msg proto.Message) error {
-	data, err := proto.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
+// serverHandshake sends ServerHello and negotiates encryption, returns wrapped conn
+func serverHandshake(nc net.Conn, kp *KeyPair, allowedKeys [][]byte) (net.Conn, error) {
+	hello := &pb.ServerHello{
+		Magic:        "TSVC",
+		Version:      serviceVersion,
+		AuthRequired: kp != nil,
+	}
+	if kp != nil {
+		hello.PublicKey = kp.pubKeyBytes
 	}
 
-	if c.enc != nil {
-		data = c.enc.encrypt(data)
+	if err := writeFramed(nc, hello); err != nil {
+		return nil, fmt.Errorf("write server hello: %w", err)
+	}
+	if kp == nil {
+		return nc, nil
 	}
 
-	var lenBuf [4]byte
-	binary.BigEndian.PutUint32(lenBuf[:], uint32(len(data)))
-	if _, err := c.nc.Write(lenBuf[:]); err != nil {
-		return err
+	var clientHello pb.ClientHello
+	if err := readFramed(nc, &clientHello); err != nil {
+		return nil, fmt.Errorf("read client hello: %w", err)
 	}
 
-	_, err = c.nc.Write(data)
-	return err
-}
-
-// readMsg reads a length-prefixed, optionally encrypted proto message
-func (c *conn) readMsg(msg proto.Message) error {
-	var lenBuf [4]byte
-	if _, err := io.ReadFull(c.nc, lenBuf[:]); err != nil {
-		return err
-	}
-
-	size := binary.BigEndian.Uint32(lenBuf[:])
-	if size > 8*1024*1024 {
-		return fmt.Errorf("message too large: %d bytes", size)
-	}
-
-	data := make([]byte, size)
-	if _, err := io.ReadFull(c.nc, data); err != nil {
-		return err
-	}
-
-	if c.enc != nil {
-		var err error
-		data, err = c.enc.decrypt(data)
-		if err != nil {
-			return err
+	if len(allowedKeys) > 0 {
+		allowed := false
+		for _, k := range allowedKeys {
+			if len(k) == len(clientHello.PublicKey) && len(k) > 0 {
+				match := true
+				for i := range k {
+					if k[i] != clientHello.PublicKey[i] {
+						match = false
+						break
+					}
+				}
+				if match {
+					allowed = true
+					break
+				}
+			}
+		}
+		if !allowed {
+			return nil, fmt.Errorf("client public key not in allowlist")
 		}
 	}
 
-	return proto.Unmarshal(data, msg)
+	sharedKey, err := kp.privKey.Decapsulate(clientHello.Ciphertext)
+	if err != nil {
+		return nil, fmt.Errorf("decapsulate: %w", err)
+	}
+
+	encLayer := newServiceEncLayer(sharedKey, false)
+	return newEncryptedConn(nc, encLayer), nil
+}
+
+// clientHandshake reads ServerHello and negotiates encryption, returns wrapped conn
+func clientHandshake(nc net.Conn, kp *KeyPair) (net.Conn, error) {
+	var serverHello pb.ServerHello
+	if err := readFramed(nc, &serverHello); err != nil {
+		return nil, fmt.Errorf("read server hello: %w", err)
+	}
+
+	if serverHello.Magic != "TSVC" {
+		return nil, fmt.Errorf("invalid magic: %s", serverHello.Magic)
+	}
+
+	if serverHello.Version != serviceVersion {
+		return nil, fmt.Errorf("unsupported version: %d", serverHello.Version)
+	}
+
+	if !serverHello.AuthRequired {
+		return nc, nil
+	}
+
+	if kp == nil {
+		return nil, fmt.Errorf("server requires auth but no client keypair provided")
+	}
+
+	// Encapsulate shared secret using server public key
+	encKey, err := mlkem.NewEncapsulationKey768(serverHello.PublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("invalid server public key: %w", err)
+	}
+
+	sharedKey, ciphertext := encKey.Encapsulate()
+
+	clientHello := &pb.ClientHello{
+		Ciphertext: ciphertext,
+		PublicKey:  kp.pubKeyBytes,
+	}
+
+	if err := writeFramed(nc, clientHello); err != nil {
+		return nil, fmt.Errorf("write client hello: %w", err)
+	}
+
+	encLayer := newServiceEncLayer(sharedKey, true)
+	return newEncryptedConn(nc, encLayer), nil
 }

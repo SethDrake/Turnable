@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/theairblow/turnable/pkg/config"
 	http "github.com/useflyent/fhttp"
 )
 
@@ -92,11 +93,7 @@ func (V *VKHandler) solveManualCaptcha(ctx context.Context, joinURL string) (str
 		"url", joinURL,
 		"timeout", manualCaptchaTimeout)
 
-	V.mu.RLock()
-	interactive := V.interactive
-	V.mu.RUnlock()
-
-	if interactive {
+	if config.Options.Interactive {
 		manualCaptchaOpenBrowser(joinURL)
 	}
 

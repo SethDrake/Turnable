@@ -7,6 +7,7 @@ import (
 )
 
 var (
+	ProvidersHolder   RegistryHolder // Safe holder for config.Providers
 	ConnectionsHolder RegistryHolder // Safe holder for connection.Handlers
 	PlatformsHolder   RegistryHolder // Safe holder for platform.Handlers
 	TransportsHolder  RegistryHolder // Safe holder for transport.Handlers

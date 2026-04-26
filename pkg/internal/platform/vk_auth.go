@@ -127,7 +127,7 @@ func endVKAuth(key string) {
 }
 
 // Authorize authorizes with VK and fetches the signaling and TURN session state
-func (V *VKHandler) Authorize(callID string, username string, interactive bool) error {
+func (V *VKHandler) Authorize(callID string, username string) error {
 	if strings.TrimSpace(callID) == "" {
 		return errors.New("call ID is required")
 	}
@@ -151,7 +151,6 @@ func (V *VKHandler) Authorize(callID string, username string, interactive bool) 
 	V.callID = normalizedCallID
 	V.joinURL = joinURL
 	V.username = name
-	V.interactive = interactive
 	V.mu.Unlock()
 
 	cacheKey := normalizedCallID + "|" + name

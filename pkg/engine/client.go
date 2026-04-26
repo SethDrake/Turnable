@@ -9,7 +9,6 @@ import (
 
 	"github.com/theairblow/turnable/pkg/config"
 	"github.com/theairblow/turnable/pkg/internal/connection"
-	"github.com/theairblow/turnable/pkg/tunnels"
 )
 
 // TurnableClient represents a Turnable client
@@ -45,7 +44,7 @@ func NewTurnableClient(cfg config.ClientConfig) *TurnableClient {
 }
 
 // Start starts the Turnable client using the provided local tunnel handler
-func (c *TurnableClient) Start(tunnelHandler tunnels.Handler) error {
+func (c *TurnableClient) Start(listenAddr string) error {
 	if !c.running.CompareAndSwap(false, true) {
 		return errors.New("already running")
 	}
@@ -57,11 +56,8 @@ func (c *TurnableClient) Start(tunnelHandler tunnels.Handler) error {
 		}
 	}()
 
-	if tunnelHandler == nil {
-		return fmt.Errorf("tunnel handler is required")
-	}
-
-	tunnelHandler.SetLogger(c.log)
+	socket := SocketHandler{}
+	socket.SetLogger(c.log)
 
 	c.log.Info("starting turnable client", "connection_type", c.Config.Type)
 
@@ -79,7 +75,7 @@ func (c *TurnableClient) Start(tunnelHandler tunnels.Handler) error {
 
 	c.handler = connHandler
 
-	acceptCh, err := tunnelHandler.Open(c.ctx, c.Config.Socket)
+	acceptCh, err := socket.Open(c.ctx, c.Config.Socket, listenAddr)
 	if err != nil {
 		_ = connHandler.Close()
 		return fmt.Errorf("open tunnel: %w", err)
@@ -121,7 +117,7 @@ func (c *TurnableClient) Stop() error {
 }
 
 // acceptClients accepts local clients and handles them
-func (c *TurnableClient) acceptClients(acceptCh <-chan tunnels.AcceptedClient) {
+func (c *TurnableClient) acceptClients(acceptCh <-chan AcceptedClient) {
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -136,7 +132,7 @@ func (c *TurnableClient) acceptClients(acceptCh <-chan tunnels.AcceptedClient) {
 }
 
 // handleClient opens a tinymux channel and pipes the local client through it
-func (c *TurnableClient) handleClient(local tunnels.AcceptedClient) {
+func (c *TurnableClient) handleClient(local AcceptedClient) {
 	if c.handler == nil {
 		c.log.Warn("no active handler for local client")
 		_ = local.Stream.Close()

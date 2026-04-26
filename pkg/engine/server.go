@@ -3,13 +3,11 @@ package engine
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"sync/atomic"
 
 	"github.com/theairblow/turnable/pkg/config"
 	"github.com/theairblow/turnable/pkg/internal/connection"
-	"github.com/theairblow/turnable/pkg/tunnels"
 )
 
 // TurnableServer represents a Turnable server
@@ -45,7 +43,7 @@ func NewTurnableServer(cfg config.ServerConfig) *TurnableServer {
 }
 
 // Start starts all enabled connection handlers
-func (s *TurnableServer) Start(tunnelHandler tunnels.Handler) error {
+func (s *TurnableServer) Start() error {
 	if !s.running.CompareAndSwap(false, true) {
 		return errors.New("already running")
 	}
@@ -57,11 +55,8 @@ func (s *TurnableServer) Start(tunnelHandler tunnels.Handler) error {
 		}
 	}()
 
-	if tunnelHandler == nil {
-		return fmt.Errorf("tunnel handler is required")
-	}
-
-	tunnelHandler.SetLogger(s.log)
+	socket := SocketHandler{}
+	socket.SetLogger(s.log)
 
 	if s.Config.P2P.Enabled {
 		return errors.New("P2P mode is not supported")
@@ -85,7 +80,7 @@ func (s *TurnableServer) Start(tunnelHandler tunnels.Handler) error {
 
 		s.handlers = append(s.handlers, connHandler)
 
-		go s.acceptClients(connHandler, tunnelHandler)
+		go s.acceptClients(connHandler, socket)
 	}
 
 	success = true
@@ -121,7 +116,7 @@ func (s *TurnableServer) Stop() error {
 }
 
 // acceptClients accepts authenticated clients and handles them
-func (s *TurnableServer) acceptClients(handler connection.Handler, tunnelHandler tunnels.Handler) {
+func (s *TurnableServer) acceptClients(handler connection.Handler, socket SocketHandler) {
 	clientCh, err := handler.AcceptClients(s.ctx)
 	if err != nil {
 		s.log.Warn("accept clients failed", "error", err)
@@ -135,16 +130,16 @@ func (s *TurnableServer) acceptClients(handler connection.Handler, tunnelHandler
 			continue
 		}
 
-		go s.handleClient(client, tunnelHandler)
+		go s.handleClient(client, socket)
 	}
 }
 
 // handleClient dials the backend route and pipes the tinymux channel through it
-func (s *TurnableServer) handleClient(client connection.ServerClient, tunnelHandler tunnels.Handler) {
+func (s *TurnableServer) handleClient(client connection.ServerClient, socket SocketHandler) {
 	routeCtx, routeCancel := context.WithCancel(s.ctx)
 	defer routeCancel()
 
-	routeIO, err := tunnelHandler.Connect(routeCtx, client.Route)
+	routeIO, err := socket.Connect(routeCtx, client.Route)
 	if err != nil {
 		s.log.Warn("failed to connect to route", "addr", client.Address, "route", client.Route.ID, "error", err)
 		_ = client.Conn.Close()

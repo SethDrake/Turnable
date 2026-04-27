@@ -250,7 +250,7 @@ Produced config URL or JSON is the only thing you need to provide to your users.
 <details>
 <summary>Turnable Client</summary>
 
-Setting up a Turnable client is almost effortless. On android, its recommended that you use [Termux](https://f-droid.org/en/packages/com.termux/). Keep in mind that Turnable is just a tunnel - you still need to set up a VPN/Proxy client. It is recommended that you use [WireGuard](https://www.wireguard.com/quickstart/).
+Setting up a Turnable client is almost effortless. Keep in mind that Turnable is just a tunnel - you still need to set up a VPN/Proxy client. It is recommended that you use [WireGuard](https://www.wireguard.com/quickstart/). To set it up on Android, follow [this guide](docs/client/ANDROID.md).
 
 #### 1. Obtain a client config
 ##### 1.1. With intermediary
@@ -288,9 +288,9 @@ Configure your proxy/VPN client application to use `127.0.0.1:1080` (or whatever
 
 ## Reference
 ### Platforms
-| ID       | Description                                                                                                   |
-|----------|---------------------------------------------------------------------------------------------------------------|
-| `vk.com` | Authenticates anonymously through [VKontakte](https://vk.com) and joins a meeting. [Usage guide](docs/VK.md). |
+| ID       | Description                                                                                                             |
+|----------|-------------------------------------------------------------------------------------------------------------------------|
+| `vk.com` | Authenticates anonymously through [VKontakte](https://vk.com) and joins a meeting. [Usage guide](docs/platforms/VK.md). |
 
 ### Connection types
 | Type     | Description                                                                                                                                    |

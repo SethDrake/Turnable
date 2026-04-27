@@ -35,9 +35,9 @@ if [[ ! -f "$BINARY" ]]; then
 fi
 
 if [[ "$2" == *.json ]]; then
-    "$BINARY" -l "$1" -c "$2" "${@:3}"
+    "$BINARY" client -l "$1" -c "$2" "${@:3}"
 else
-    "$BINARY" -l "$1" "$(cat "$2")" "${@:3}"
+    "$BINARY" client -l "$1" "$(cat "$2")" "${@:3}"
 fi
 EOF
 

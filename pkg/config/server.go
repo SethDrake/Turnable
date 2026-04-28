@@ -134,9 +134,6 @@ func (s *ServerConfig) StopProvider() error {
 
 // Validate validates the ServerConfig
 func (s *ServerConfig) Validate() error {
-	if s.provider == nil {
-		return errors.New("config provider must be initialized")
-	}
 	if common.IsNullOrWhiteSpace(s.CallID) {
 		return errors.New("call_id is required")
 	}
@@ -169,13 +166,6 @@ func (s *ServerConfig) Validate() error {
 			}
 		} else if net.ParseIP(host) == nil {
 			return fmt.Errorf("invalid host in relay public_ip: %s", host)
-		}
-	}
-
-	for _, route := range s.GetAllRoutes() {
-		err := route.Validate()
-		if err != nil {
-			return fmt.Errorf("route %s is invalid: %w", route.ID, err)
 		}
 	}
 

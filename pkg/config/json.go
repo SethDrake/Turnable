@@ -73,6 +73,13 @@ func (j *JSONProvider) Update(config json.RawMessage) error {
 		users[user.UUID] = user
 	}
 
+	for _, route := range routes {
+		err := route.Validate()
+		if err != nil {
+			return fmt.Errorf("route %s is invalid: %w", route.ID, err)
+		}
+	}
+
 	j.data.Routes = routes
 	j.data.Users = users
 	return nil

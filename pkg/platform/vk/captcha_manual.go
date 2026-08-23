@@ -15,7 +15,7 @@ import (
 	http "github.com/useflyent/fhttp"
 )
 
-//go:embed manual_captcha.user.js
+//go:embed captcha_manual.user.js
 var vkCaptchaUserScript []byte
 
 const (
@@ -38,7 +38,7 @@ func (V *Handler) solveManualCaptcha(ctx context.Context, joinURL string) (strin
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		_, _ = fmt.Fprint(w, "ok")
 	})
-	mux.HandleFunc("/manual_captcha.user.js", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/captcha_manual.user.js", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		_, _ = w.Write(vkCaptchaUserScript)
@@ -88,7 +88,7 @@ func (V *Handler) solveManualCaptcha(ctx context.Context, joinURL string) (strin
 	}
 
 	slog.Info("manual captcha solve required",
-		"userscript", "http://localhost:"+manualCaptchaPort+"/manual_captcha.user.js",
+		"userscript", "http://localhost:"+manualCaptchaPort+"/captcha_manual.user.js",
 		"guide", "http://localhost:"+manualCaptchaPort+"/",
 		"url", joinURL,
 		"timeout", manualCaptchaTimeout)

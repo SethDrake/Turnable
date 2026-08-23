@@ -285,21 +285,21 @@ func (V *Handler) authorizeAnonymous(ctx context.Context, joinURL, username stri
 			slog.Info("vk captcha challenge received", "request_attempt", attempt+1, "max_attempts", vkCaptchaRetries)
 
 			solveStartedAt := time.Now()
-			successToken, solveErr := V.solveCaptchaWithRetry(ctx, apiErr)
+			successToken, solveErr := V.solveCaptcha(ctx, apiErr)
 
 			if solveErr != nil {
 				slog.Warn("vk captcha solve failed", "duration_ms", time.Since(solveStartedAt).Milliseconds(), "error", solveErr)
 				if errors.Is(solveErr, errCaptchaRateLimit) {
-					messagesToken = ""
-					slog.Info("vk captcha rate limited, retrying", "delay", 5*time.Second)
+					slog.Info("vk captcha rate limited, retrying", "delay", 60*time.Second)
 					select {
 					case <-ctx.Done():
 						return "", "", ctx.Err()
-					case <-time.After(5 * time.Second):
+					case <-time.After(60 * time.Second):
 					}
-					continue
 				}
-				return "", "", solveErr
+
+				messagesToken = ""
+				continue
 			}
 
 			slog.Info("vk captcha solved", "duration_ms", time.Since(solveStartedAt).Milliseconds(), "request_attempt", attempt+1)
